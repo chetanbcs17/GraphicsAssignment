@@ -21,6 +21,15 @@
 #define MAX_OBJECTS 25
 #define MAX_BUILDINGS 1
 
+#define RAD2DEG 57.29577951308232f
+
+// Gun aiming / animation
+float gunAimYaw = 0.0f;   // current gun local yaw (deg)
+float gunAimPitch = 0.0f; // current gun local pitch (deg)
+float gunAimTargetYaw = 0.0f;
+float gunAimTargetPitch = 0.0f;
+float gunAimBlend = 0.0f; // 0..1: 1 = fully aimed at target
+
 // Camera rotation (orbit)
 int th = 45, ph = 20;
 float camX = 0, camY = 2, camZ = 15;
@@ -249,141 +258,6 @@ void drawMuzzleFlash()
     glEnable(GL_LIGHTING);
 }
 
-void drawGun()
-{
-    glDisable(GL_BLEND);
-    glPushMatrix();
-
-    glTranslatef(0.35f, -0.35f, -2.0f);
-    glTranslatef(0, gunRecoil * 0.05f, gunRecoil * 0.1f);
-
-    int tid = getNearestTargetIndex();
-    if (tid >= 0)
-    {
-        float dx = targets[tid].x - fpvX;
-        float dy = targets[tid].y - fpvY;
-        float dz = targets[tid].z - fpvZ;
-
-        float targetYaw = atan2f(dx, dz) * (180.0f / M_PI);
-        float horiz = sqrtf(dx * dx + dz * dz);
-        float targetPitch = atan2f(dy, horiz) * (180.0f / M_PI);
-
-        float yawOffset = (targetYaw - fpvYaw) * 0.3f;
-        float pitchOffset = (targetPitch - fpvPitch) * 0.3f;
-
-        if (yawOffset > 15.0f)
-            yawOffset = 15.0f;
-        if (yawOffset < -15.0f)
-            yawOffset = -15.0f;
-        if (pitchOffset > 15.0f)
-            pitchOffset = 15.0f;
-        if (pitchOffset < -15.0f)
-            pitchOffset = -15.0f;
-
-        glRotatef(yawOffset, 0, 1, 0);
-        glRotatef(-pitchOffset, 1, 0, 0);
-    }
-
-    glPushMatrix();
-    glRotatef(-90, 0, 1, 0);
-    glScalef(0.28f, 0.28f, 0.28f);
-
-    glEnable(GL_TEXTURE_2D);
-    glEnable(GL_LIGHTING);
-    glEnable(GL_NORMALIZE);
-
-    float gunAmbient[] = {0.35f, 0.35f, 0.37f, 1.0f};
-    float gunDiffuse[] = {0.45f, 0.45f, 0.5f, 1.0f};
-    float gunSpecular[] = {0.95f, 0.95f, 1.0f, 1.0f};
-    float gunShininess[] = {90.0f};
-    glMaterialfv(GL_FRONT, GL_AMBIENT, gunAmbient);
-    glMaterialfv(GL_FRONT, GL_DIFFUSE, gunDiffuse);
-    glMaterialfv(GL_FRONT, GL_SPECULAR, gunSpecular);
-    glMaterialfv(GL_FRONT, GL_SHININESS, gunShininess);
-
-    if (gunModel.vertexCount > 0)
-    {
-        glBindTexture(GL_TEXTURE_2D, texGunDiffuse);
-        glBegin(GL_TRIANGLES);
-        for (int i = 0; i < gunModel.vertexCount; i++)
-        {
-            glNormal3f(gunModel.normals[i * 3],
-                       gunModel.normals[i * 3 + 1],
-                       gunModel.normals[i * 3 + 2]);
-            glTexCoord2f(gunModel.texCoords[i * 2],
-                         gunModel.texCoords[i * 2 + 1]);
-            glVertex3f(gunModel.vertices[i * 3],
-                       gunModel.vertices[i * 3 + 1],
-                       gunModel.vertices[i * 3 + 2]);
-        }
-        glEnd();
-    }
-    else
-    {
-        // Procedural gun fallback
-        glBindTexture(GL_TEXTURE_2D, texMetal);
-
-        glPushMatrix();
-        glColor3f(0.22f, 0.22f, 0.24f);
-        glTranslatef(0, 0, -0.5f);
-        glScalef(0.5f, 0.2f, 1.2f);
-        glutSolidCube(1.0);
-        glPopMatrix();
-
-        glColor3f(0.17f, 0.17f, 0.19f);
-        glPushMatrix();
-        glTranslatef(0.0f, 0.08f, -1.5f);
-        glRotatef(90, 0, 1, 0);
-        GLUquadric *barrel = gluNewQuadric();
-        gluQuadricTexture(barrel, GL_TRUE);
-        gluCylinder(barrel, 0.06, 0.05, 1.2, 24, 1);
-        gluDeleteQuadric(barrel);
-        glPopMatrix();
-
-        glColor3f(0.1f, 0.1f, 0.1f);
-        glPushMatrix();
-        glTranslatef(0.0f, 0.08f, -2.7f);
-        glRotatef(90, 0, 1, 0);
-        GLUquadric *muzzle = gluNewQuadric();
-        gluQuadricTexture(muzzle, GL_TRUE);
-        gluCylinder(muzzle, 0.07, 0.06, 0.15, 24, 1);
-        gluDeleteQuadric(muzzle);
-        glPopMatrix();
-
-        glColor3f(0.2f, 0.2f, 0.22f);
-        glPushMatrix();
-        glTranslatef(0, 0.15f, -0.8f + gunRecoil * 0.15f);
-        glScalef(0.45f, 0.12f, 1.1f);
-        glutSolidCube(1.0);
-        glPopMatrix();
-
-        glColor3f(0.14f, 0.08f, 0.05f);
-        glPushMatrix();
-        glTranslatef(0.0f, -0.2f, 0.1f);
-        glRotatef(-25, 1, 0, 0);
-        glScalef(0.15f, 0.35f, 0.1f);
-        glutSolidCube(1.0);
-        glPopMatrix();
-    }
-
-    glDisable(GL_TEXTURE_2D);
-    glPopMatrix();
-    glPopMatrix();
-
-    glEnable(GL_BLEND);
-    drawMuzzleFlash();
-    glDisable(GL_BLEND);
-
-    float defAmbient[] = {0.2f, 0.2f, 0.2f, 1.0f};
-    float defDiffuse[] = {0.8f, 0.8f, 0.8f, 1.0f};
-    float defSpecular[] = {0.0f, 0.0f, 0.0f, 1.0f};
-    float defShininess[] = {0.0f};
-    glMaterialfv(GL_FRONT, GL_AMBIENT, defAmbient);
-    glMaterialfv(GL_FRONT, GL_DIFFUSE, defDiffuse);
-    glMaterialfv(GL_FRONT, GL_SPECULAR, defSpecular);
-    glMaterialfv(GL_FRONT, GL_SHININESS, defShininess);
-}
-
 bool loadOBJ(const char *path, GunModel *model)
 {
     FILE *file = fopen(path, "r");
@@ -393,50 +267,91 @@ bool loadOBJ(const char *path, GunModel *model)
         return false;
     }
 
-    float *tempVertices = (float *)malloc(10000 * 3 * sizeof(float));
-    float *tempNormals = (float *)malloc(10000 * 3 * sizeof(float));
-    float *tempTexCoords = (float *)malloc(10000 * 2 * sizeof(float));
+    // Allocate larger buffers for big models (50k vertices/faces)
+    float *tempVertices = (float *)malloc(50000 * 3 * sizeof(float));
+    float *tempNormals = (float *)malloc(50000 * 3 * sizeof(float));
+    float *tempTexCoords = (float *)malloc(50000 * 2 * sizeof(float));
     int vCount = 0, nCount = 0, tCount = 0;
 
-    float *vertices = (float *)malloc(30000 * sizeof(float));
-    float *normals = (float *)malloc(30000 * sizeof(float));
-    float *texCoords = (float *)malloc(20000 * sizeof(float));
+    float *vertices = (float *)malloc(150000 * sizeof(float));
+    float *normals = (float *)malloc(150000 * sizeof(float));
+    float *texCoords = (float *)malloc(100000 * sizeof(float));
     int faceCount = 0;
+    int maxFaces = 50000; // Maximum number of faces to load
 
     char line[256];
+    int lineNum = 0;
+
     while (fgets(line, sizeof(line), file))
     {
+        lineNum++;
+
+        // Skip comments and empty lines
+        if (line[0] == '#' || line[0] == '\n' || line[0] == '\r')
+            continue;
+
         if (strncmp(line, "v ", 2) == 0)
         {
-            sscanf(line, "v %f %f %f",
-                   &tempVertices[vCount * 3],
-                   &tempVertices[vCount * 3 + 1],
-                   &tempVertices[vCount * 3 + 2]);
-            vCount++;
+            float x, y, z;
+            if (sscanf(line, "v %f %f %f", &x, &y, &z) == 3)
+            {
+                tempVertices[vCount * 3] = x;
+                tempVertices[vCount * 3 + 1] = y;
+                tempVertices[vCount * 3 + 2] = z;
+                vCount++;
+            }
         }
         else if (strncmp(line, "vn ", 3) == 0)
         {
-            sscanf(line, "vn %f %f %f",
-                   &tempNormals[nCount * 3],
-                   &tempNormals[nCount * 3 + 1],
-                   &tempNormals[nCount * 3 + 2]);
-            nCount++;
+            float x, y, z;
+            if (sscanf(line, "vn %f %f %f", &x, &y, &z) == 3)
+            {
+                tempNormals[nCount * 3] = x;
+                tempNormals[nCount * 3 + 1] = y;
+                tempNormals[nCount * 3 + 2] = z;
+                nCount++;
+            }
         }
         else if (strncmp(line, "vt ", 3) == 0)
         {
-            sscanf(line, "vt %f %f",
-                   &tempTexCoords[tCount * 2],
-                   &tempTexCoords[tCount * 2 + 1]);
-            tCount++;
+            float u, v;
+            if (sscanf(line, "vt %f %f", &u, &v) == 2)
+            {
+                tempTexCoords[tCount * 2] = u;
+                tempTexCoords[tCount * 2 + 1] = v;
+                tCount++;
+            }
         }
         else if (strncmp(line, "f ", 2) == 0)
         {
+            // Check if we've reached max faces
+            if (faceCount >= maxFaces)
+            {
+                printf("Warning: Reached maximum face count (%d), stopping load\n", maxFaces);
+                break;
+            }
+
             int v1, v2, v3, t1, t2, t3, n1, n2, n3;
-            int matches = sscanf(line, "f %d/%d/%d %d/%d/%d %d/%d/%d",
-                                 &v1, &t1, &n1, &v2, &t2, &n2, &v3, &t3, &n3);
+            int matches;
+
+            // Try format: f v/vt/vn v/vt/vn v/vt/vn
+            matches = sscanf(line, "f %d/%d/%d %d/%d/%d %d/%d/%d",
+                             &v1, &t1, &n1, &v2, &t2, &n2, &v3, &t3, &n3);
 
             if (matches == 9)
             {
+                // Bounds checking
+                if (v1 < 1 || v1 > vCount || v2 < 1 || v2 > vCount || v3 < 1 || v3 > vCount ||
+                    t1 < 1 || t1 > tCount || t2 < 1 || t2 > tCount || t3 < 1 || t3 > tCount ||
+                    n1 < 1 || n1 > nCount || n2 < 1 || n2 > nCount || n3 < 1 || n3 > nCount)
+                {
+                    printf("Line %d: Index out of bounds, skipping\n", lineNum);
+                    continue;
+                }
+
+                // All three components present
+
+                // Vertex 1
                 vertices[faceCount * 9] = tempVertices[(v1 - 1) * 3];
                 vertices[faceCount * 9 + 1] = tempVertices[(v1 - 1) * 3 + 1];
                 vertices[faceCount * 9 + 2] = tempVertices[(v1 - 1) * 3 + 2];
@@ -446,6 +361,7 @@ bool loadOBJ(const char *path, GunModel *model)
                 texCoords[faceCount * 6] = tempTexCoords[(t1 - 1) * 2];
                 texCoords[faceCount * 6 + 1] = tempTexCoords[(t1 - 1) * 2 + 1];
 
+                // Vertex 2
                 vertices[faceCount * 9 + 3] = tempVertices[(v2 - 1) * 3];
                 vertices[faceCount * 9 + 4] = tempVertices[(v2 - 1) * 3 + 1];
                 vertices[faceCount * 9 + 5] = tempVertices[(v2 - 1) * 3 + 2];
@@ -455,6 +371,7 @@ bool loadOBJ(const char *path, GunModel *model)
                 texCoords[faceCount * 6 + 2] = tempTexCoords[(t2 - 1) * 2];
                 texCoords[faceCount * 6 + 3] = tempTexCoords[(t2 - 1) * 2 + 1];
 
+                // Vertex 3
                 vertices[faceCount * 9 + 6] = tempVertices[(v3 - 1) * 3];
                 vertices[faceCount * 9 + 7] = tempVertices[(v3 - 1) * 3 + 1];
                 vertices[faceCount * 9 + 8] = tempVertices[(v3 - 1) * 3 + 2];
@@ -466,6 +383,205 @@ bool loadOBJ(const char *path, GunModel *model)
 
                 faceCount++;
             }
+            else
+            {
+                // Try format: f v//vn v//vn v//vn
+                matches = sscanf(line, "f %d//%d %d//%d %d//%d",
+                                 &v1, &n1, &v2, &n2, &v3, &n3);
+
+                if (matches == 6)
+                {
+                    // Bounds checking
+                    if (v1 < 1 || v1 > vCount || v2 < 1 || v2 > vCount || v3 < 1 || v3 > vCount ||
+                        n1 < 1 || n1 > nCount || n2 < 1 || n2 > nCount || n3 < 1 || n3 > nCount)
+                    {
+                        printf("Line %d: Index out of bounds (v1=%d,v2=%d,v3=%d,n1=%d,n2=%d,n3=%d), vCount=%d, nCount=%d\n",
+                               lineNum, v1, v2, v3, n1, n2, n3, vCount, nCount);
+                        continue;
+                    }
+
+                    if (lineNum % 10000 == 0) // Print progress every 10k lines
+                        printf("Line %d: Processing face %d with v//vn format\n", lineNum, faceCount);
+
+                    // Vertex 1
+                    vertices[faceCount * 9] = tempVertices[(v1 - 1) * 3];
+                    vertices[faceCount * 9 + 1] = tempVertices[(v1 - 1) * 3 + 1];
+                    vertices[faceCount * 9 + 2] = tempVertices[(v1 - 1) * 3 + 2];
+                    normals[faceCount * 9] = tempNormals[(n1 - 1) * 3];
+                    normals[faceCount * 9 + 1] = tempNormals[(n1 - 1) * 3 + 1];
+                    normals[faceCount * 9 + 2] = tempNormals[(n1 - 1) * 3 + 2];
+                    texCoords[faceCount * 6] = 0.0f;
+                    texCoords[faceCount * 6 + 1] = 0.0f;
+
+                    // Vertex 2
+                    vertices[faceCount * 9 + 3] = tempVertices[(v2 - 1) * 3];
+                    vertices[faceCount * 9 + 4] = tempVertices[(v2 - 1) * 3 + 1];
+                    vertices[faceCount * 9 + 5] = tempVertices[(v2 - 1) * 3 + 2];
+                    normals[faceCount * 9 + 3] = tempNormals[(n2 - 1) * 3];
+                    normals[faceCount * 9 + 4] = tempNormals[(n2 - 1) * 3 + 1];
+                    normals[faceCount * 9 + 5] = tempNormals[(n2 - 1) * 3 + 2];
+                    texCoords[faceCount * 6 + 2] = 1.0f;
+                    texCoords[faceCount * 6 + 3] = 0.0f;
+
+                    // Vertex 3
+                    vertices[faceCount * 9 + 6] = tempVertices[(v3 - 1) * 3];
+                    vertices[faceCount * 9 + 7] = tempVertices[(v3 - 1) * 3 + 1];
+                    vertices[faceCount * 9 + 8] = tempVertices[(v3 - 1) * 3 + 2];
+                    normals[faceCount * 9 + 6] = tempNormals[(n3 - 1) * 3];
+                    normals[faceCount * 9 + 7] = tempNormals[(n3 - 1) * 3 + 1];
+                    normals[faceCount * 9 + 8] = tempNormals[(n3 - 1) * 3 + 2];
+                    texCoords[faceCount * 6 + 4] = 0.5f;
+                    texCoords[faceCount * 6 + 5] = 1.0f;
+
+                    faceCount++;
+                }
+                else
+                {
+                    // Try format: f v/vt v/vt v/vt
+                    matches = sscanf(line, "f %d/%d %d/%d %d/%d",
+                                     &v1, &t1, &v2, &t2, &v3, &t3);
+
+                    if (matches == 6)
+                    {
+                        // Bounds checking
+                        if (v1 < 1 || v1 > vCount || v2 < 1 || v2 > vCount || v3 < 1 || v3 > vCount ||
+                            t1 < 1 || t1 > tCount || t2 < 1 || t2 > tCount || t3 < 1 || t3 > tCount)
+                        {
+                            printf("Line %d: Index out of bounds, skipping\n", lineNum);
+                            continue;
+                        }
+
+                        if (lineNum % 10000 == 0)
+                            printf("Line %d: Found face with v/vt format (no normals)\n", lineNum);
+
+                        // Calculate normal from vertices
+                        float *p1 = &tempVertices[(v1 - 1) * 3];
+                        float *p2 = &tempVertices[(v2 - 1) * 3];
+                        float *p3 = &tempVertices[(v3 - 1) * 3];
+
+                        float u[3] = {p2[0] - p1[0], p2[1] - p1[1], p2[2] - p1[2]};
+                        float v[3] = {p3[0] - p1[0], p3[1] - p1[1], p3[2] - p1[2]};
+
+                        float nx = u[1] * v[2] - u[2] * v[1];
+                        float ny = u[2] * v[0] - u[0] * v[2];
+                        float nz = u[0] * v[1] - u[1] * v[0];
+
+                        float len = sqrtf(nx * nx + ny * ny + nz * nz);
+                        if (len > 0.0001f)
+                        {
+                            nx /= len;
+                            ny /= len;
+                            nz /= len;
+                        }
+
+                        // Vertex 1
+                        vertices[faceCount * 9] = p1[0];
+                        vertices[faceCount * 9 + 1] = p1[1];
+                        vertices[faceCount * 9 + 2] = p1[2];
+                        normals[faceCount * 9] = nx;
+                        normals[faceCount * 9 + 1] = ny;
+                        normals[faceCount * 9 + 2] = nz;
+                        texCoords[faceCount * 6] = tempTexCoords[(t1 - 1) * 2];
+                        texCoords[faceCount * 6 + 1] = tempTexCoords[(t1 - 1) * 2 + 1];
+
+                        // Vertex 2
+                        vertices[faceCount * 9 + 3] = p2[0];
+                        vertices[faceCount * 9 + 4] = p2[1];
+                        vertices[faceCount * 9 + 5] = p2[2];
+                        normals[faceCount * 9 + 3] = nx;
+                        normals[faceCount * 9 + 4] = ny;
+                        normals[faceCount * 9 + 5] = nz;
+                        texCoords[faceCount * 6 + 2] = tempTexCoords[(t2 - 1) * 2];
+                        texCoords[faceCount * 6 + 3] = tempTexCoords[(t2 - 1) * 2 + 1];
+
+                        // Vertex 3
+                        vertices[faceCount * 9 + 6] = p3[0];
+                        vertices[faceCount * 9 + 7] = p3[1];
+                        vertices[faceCount * 9 + 8] = p3[2];
+                        normals[faceCount * 9 + 6] = nx;
+                        normals[faceCount * 9 + 7] = ny;
+                        normals[faceCount * 9 + 8] = nz;
+                        texCoords[faceCount * 6 + 4] = tempTexCoords[(t3 - 1) * 2];
+                        texCoords[faceCount * 6 + 5] = tempTexCoords[(t3 - 1) * 2 + 1];
+
+                        faceCount++;
+                    }
+                    else
+                    {
+                        // Try format: f v v v (vertices only)
+                        matches = sscanf(line, "f %d %d %d", &v1, &v2, &v3);
+
+                        if (matches == 3)
+                        {
+                            // Bounds checking
+                            if (v1 < 1 || v1 > vCount || v2 < 1 || v2 > vCount || v3 < 1 || v3 > vCount)
+                            {
+                                printf("Line %d: Index out of bounds, skipping\n", lineNum);
+                                continue;
+                            }
+
+                            if (lineNum % 10000 == 0)
+                                printf("Line %d: Found face with v format (vertices only)\n", lineNum);
+
+                            // Calculate normal from vertices
+                            float *p1 = &tempVertices[(v1 - 1) * 3];
+                            float *p2 = &tempVertices[(v2 - 1) * 3];
+                            float *p3 = &tempVertices[(v3 - 1) * 3];
+
+                            float u[3] = {p2[0] - p1[0], p2[1] - p1[1], p2[2] - p1[2]};
+                            float v[3] = {p3[0] - p1[0], p3[1] - p1[1], p3[2] - p1[2]};
+
+                            float nx = u[1] * v[2] - u[2] * v[1];
+                            float ny = u[2] * v[0] - u[0] * v[2];
+                            float nz = u[0] * v[1] - u[1] * v[0];
+
+                            float len = sqrtf(nx * nx + ny * ny + nz * nz);
+                            if (len > 0.0001f)
+                            {
+                                nx /= len;
+                                ny /= len;
+                                nz /= len;
+                            }
+
+                            // Vertex 1
+                            vertices[faceCount * 9] = p1[0];
+                            vertices[faceCount * 9 + 1] = p1[1];
+                            vertices[faceCount * 9 + 2] = p1[2];
+                            normals[faceCount * 9] = nx;
+                            normals[faceCount * 9 + 1] = ny;
+                            normals[faceCount * 9 + 2] = nz;
+                            texCoords[faceCount * 6] = 0.0f;
+                            texCoords[faceCount * 6 + 1] = 0.0f;
+
+                            // Vertex 2
+                            vertices[faceCount * 9 + 3] = p2[0];
+                            vertices[faceCount * 9 + 4] = p2[1];
+                            vertices[faceCount * 9 + 5] = p2[2];
+                            normals[faceCount * 9 + 3] = nx;
+                            normals[faceCount * 9 + 4] = ny;
+                            normals[faceCount * 9 + 5] = nz;
+                            texCoords[faceCount * 6 + 2] = 1.0f;
+                            texCoords[faceCount * 6 + 3] = 0.0f;
+
+                            // Vertex 3
+                            vertices[faceCount * 9 + 6] = p3[0];
+                            vertices[faceCount * 9 + 7] = p3[1];
+                            vertices[faceCount * 9 + 8] = p3[2];
+                            normals[faceCount * 9 + 6] = nx;
+                            normals[faceCount * 9 + 7] = ny;
+                            normals[faceCount * 9 + 8] = nz;
+                            texCoords[faceCount * 6 + 4] = 0.5f;
+                            texCoords[faceCount * 6 + 5] = 1.0f;
+
+                            faceCount++;
+                        }
+                        else
+                        {
+                            printf("Line %d: Unrecognized face format: %s", lineNum, line);
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -473,6 +589,9 @@ bool loadOBJ(const char *path, GunModel *model)
     free(tempVertices);
     free(tempNormals);
     free(tempTexCoords);
+
+    printf("Parsed: %d vertices, %d normals, %d texture coords\n", vCount, nCount, tCount);
+    printf("Created: %d faces\n", faceCount);
 
     model->vertices = vertices;
     model->normals = normals;
@@ -682,8 +801,40 @@ void shootBullet()
     bullets[idx].active = true;
     bullets[idx].life = 8.0f;
 
+    // recoil + muzzle flash
     gunRecoil = 1.0f;
     muzzleFlashTime = 0.1f;
+
+    // --- Aim gun to nearest target while shooting ---
+    int nearest = getNearestTargetIndex();
+    if (nearest >= 0)
+    {
+        float tx = targets[nearest].x - fpvX;
+        float ty = targets[nearest].y - fpvY;
+        float tz = targets[nearest].z - fpvZ;
+        float horiz = sqrtf(tx * tx + tz * tz);
+        // desired absolute angles (world space)
+        float desiredYaw = atan2f(tx, tz) * RAD2DEG; // degrees
+        float desiredPitch = atan2f(ty, horiz) * RAD2DEG;
+
+        // compute local offset between camera and desired angles
+        // gun will rotate by (desired - camera)
+        gunAimTargetYaw = desiredYaw - fpvYaw;
+        // wrap into [-180,180]
+        while (gunAimTargetYaw > 180.0f)
+            gunAimTargetYaw -= 360.0f;
+        while (gunAimTargetYaw < -180.0f)
+            gunAimTargetYaw += 360.0f;
+
+        gunAimTargetPitch = desiredPitch - fpvPitch;
+        // clamp modestly so gun doesn't contort
+        if (gunAimTargetPitch > 35.0f)
+            gunAimTargetPitch = 35.0f;
+        if (gunAimTargetPitch < -35.0f)
+            gunAimTargetPitch = -35.0f;
+
+        gunAimBlend = 1.0f;
+    }
 
     bulletCount++;
 }
@@ -753,6 +904,107 @@ void drawTerrain()
     glEnd();
 
     glColor3f(1.0f, 1.0f, 1.0f);
+}
+
+void drawGun()
+{
+    // If no model loaded, draw a textured simple box as fallback
+    if (gunModel.vertexCount <= 0 || !gunModel.vertices)
+    {
+        printf("Gun model not loaded, drawing fallback box.\n");
+        glEnable(GL_TEXTURE_2D);
+        glBindTexture(GL_TEXTURE_2D, texGunDiffuse);
+        glDisable(GL_LIGHTING);
+        glPushMatrix();
+        // apply mild recoil along -z
+        float recoilZ = -0.02f * gunRecoil;
+        glTranslatef(0.55f, -0.35f, -1.2f + recoilZ);
+        // apply local aim offsets
+        glRotatef(gunAimPitch, 1, 0, 0);
+        glRotatef(gunAimYaw, 0, 1, 0);
+        glScalef(0.6f, 0.3f, 1.1f);
+        // draw textured cube (6 faces)
+        glutSolidCube(1.0);
+        glPopMatrix();
+        glEnable(GL_LIGHTING);
+        return;
+    }
+
+    // Clear depth buffer so gun always renders on top
+    glClear(GL_DEPTH_BUFFER_BIT);
+
+    // Save all state
+    glPushAttrib(GL_ALL_ATTRIB_BITS);
+
+    // Set up for HUD rendering
+    glDisable(GL_DEPTH_TEST); // Draw on top of everything
+    glDisable(GL_LIGHTING);   // No lighting for HUD gun
+    glEnable(GL_TEXTURE_2D);
+
+    // Now draw the actual gun
+    glMatrixMode(GL_PROJECTION);
+    glPushMatrix();
+    glLoadIdentity();
+    gluPerspective(fov, asp, 0.01, 10.0); // Short range perspective
+
+    glMatrixMode(GL_MODELVIEW);
+    glPushMatrix();
+    glLoadIdentity();
+
+    // Position gun in camera space (adjust these to position gun)
+    float recoilZ = -0.02f * gunRecoil;
+    glTranslatef(0.4f, -0.3f, -1.2f + recoilZ); // Right, down, forward
+
+    // Apply aiming offset
+    glRotatef(gunAimPitch, 1, 0, 0);
+    glRotatef(gunAimYaw, 0, 1, 0);
+
+    // Orient the gun model (adjust rotation until it looks right)
+    glRotatef(180.0f, 0, 1, 0); // Face forward
+    glRotatef(-10.0f, 1, 0, 0); // Tilt slightly down
+    glRotatef(5.0f, 0, 0, 1);   // Slight roll for better grip angle
+
+    // Scale to appropriate size (adjust if too big/small)
+    glScalef(0.18f, 0.18f, 0.18f);
+
+    // Set up rendering - solid with color/texture
+    glEnable(GL_TEXTURE_2D);
+    glBindTexture(GL_TEXTURE_2D, texGunDiffuse);
+
+    // Use a dark gray/black color for gun if texture is missing
+    glColor3f(0.2f, 0.2f, 0.2f);
+
+    // Enable polygon fill mode (not wireframe)
+    glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+
+    // Enable smooth shading
+    glShadeModel(GL_SMOOTH);
+
+    // Enable client arrays
+    glEnableClientState(GL_VERTEX_ARRAY);
+    glEnableClientState(GL_NORMAL_ARRAY);
+    glEnableClientState(GL_TEXTURE_COORD_ARRAY);
+
+    glVertexPointer(3, GL_FLOAT, 0, gunModel.vertices);
+    glNormalPointer(GL_FLOAT, 0, gunModel.normals);
+    glTexCoordPointer(2, GL_FLOAT, 0, gunModel.texCoords);
+
+    // Draw the gun
+    glDrawArrays(GL_TRIANGLES, 0, gunModel.vertexCount);
+
+    // Cleanup
+    glDisableClientState(GL_VERTEX_ARRAY);
+    glDisableClientState(GL_NORMAL_ARRAY);
+    glDisableClientState(GL_TEXTURE_COORD_ARRAY);
+
+    // Restore matrices
+    glPopMatrix();
+    glMatrixMode(GL_PROJECTION);
+    glPopMatrix();
+    glMatrixMode(GL_MODELVIEW);
+
+    // Restore all state
+    glPopAttrib();
 }
 
 void drawWindow(float x, float y, float z, float w, float h, int orient)
@@ -1156,6 +1408,28 @@ void idle()
             muzzleFlashTime = 0;
     }
 
+    if (gunAimBlend > 0.001f)
+    {
+        // quickly move current towards target (easing)
+        // s is blending factor per-frame (0..1)
+        float s = 0.22f; // how quickly the gun snaps to target
+        gunAimYaw += (gunAimTargetYaw - gunAimYaw) * s;
+        gunAimPitch += (gunAimTargetPitch - gunAimPitch) * s;
+
+        // decay the influence so it returns to neutral after a short time
+        gunAimBlend -= 0.03f; // controls how long it stays aimed
+        if (gunAimBlend < 0.0f)
+            gunAimBlend = 0.0f;
+
+        // when blend small, lerp gunAim back to 0 gradually
+        if (gunAimBlend <= 0.0f)
+        {
+            // ease back to zero
+            gunAimYaw *= 0.85f;
+            gunAimPitch *= 0.85f;
+        }
+    }
+
     // Update door animations
     for (int i = 0; i < MAX_BUILDINGS; i++)
     {
@@ -1256,8 +1530,8 @@ void display()
         glMatrixMode(GL_MODELVIEW);
         glPushMatrix();
         glLoadIdentity();
-        drawGun();
         drawCrosshair();
+        drawGun();
         glPopMatrix();
 
         // Draw door prompt
@@ -1503,11 +1777,14 @@ void init()
     if (!texGunSpecular)
         texGunSpecular = texMetal;
 
+    printf("texGunDiffuse=%u texGunSpecular=%u\n", texGunDiffuse, texGunSpecular);
+
     gunModel.vertexCount = 0;
     if (!loadOBJ("Glock18.obj", &gunModel))
     {
         printf("Using procedural gun model (gun.obj not found)\n");
     }
+    printf("verts=%d texCoords=%p\n", gunModel.vertexCount, gunModel.texCoords);
 
     initBuildings();
     initTargets();
