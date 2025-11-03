@@ -19,7 +19,7 @@
 #define DEG2RAD 0.0174533
 #define MAX_BULLETS 200
 #define MAX_OBJECTS 25
-#define MAX_BUILDINGS 5
+#define MAX_BUILDINGS 4
 
 #define RAD2DEG 57.29577951308232f
 
@@ -63,7 +63,8 @@ GLuint texGround, texBuilding, texRoof, texConcrete, texMetal, texWood,
 GLuint texGunDiffuse, texGunSpecular, texGunNormal;
 
 // Building structure
-typedef struct {
+typedef struct
+{
   float x, z;
   float w, d;
   int stories;
@@ -77,7 +78,8 @@ typedef struct {
 Building buildings[MAX_BUILDINGS];
 
 // Gun model structure
-typedef struct {
+typedef struct
+{
   float *vertices;
   float *normals;
   float *texCoords;
@@ -87,7 +89,8 @@ typedef struct {
 GunModel gunModel;
 
 // Bullet structure
-typedef struct {
+typedef struct
+{
   float x, y, z;
   float dx, dy, dz;
   bool active;
@@ -95,7 +98,8 @@ typedef struct {
 } Bullet;
 
 // Target object structure
-typedef struct {
+typedef struct
+{
   float x, y, z;
   int hits;
   bool alive;
@@ -111,7 +115,8 @@ Target targets[MAX_OBJECTS];
 int bulletCount = 0;
 int targetsDestroyed = 0;
 
-typedef struct {
+typedef struct
+{
   float minX, maxX;
   float minY, maxY;
   float minZ, maxZ;
@@ -126,17 +131,20 @@ bool mouseCaptured = false;
 float gunRecoil = 0.0f;
 float muzzleFlashTime = 0.0f;
 
-int getNearestTargetIndex() {
+int getNearestTargetIndex()
+{
   int best = -1;
   float bestDist = 1e9f;
-  for (int i = 0; i < MAX_OBJECTS; i++) {
+  for (int i = 0; i < MAX_OBJECTS; i++)
+  {
     if (!targets[i].alive)
       continue;
     float dx = targets[i].x - fpvX;
     float dy = targets[i].y - fpvY;
     float dz = targets[i].z - fpvZ;
     float d = sqrtf(dx * dx + dy * dy + dz * dz);
-    if (d < bestDist) {
+    if (d < bestDist)
+    {
       bestDist = d;
       best = i;
     }
@@ -147,10 +155,70 @@ int getNearestTargetIndex() {
 // Forward declaration
 float getTerrainHeight(float x, float z);
 
+// Get the floor level the player is currently on inside a building (using
+// collision) Returns floor number (0 = ground floor, 1 = first floor, etc.) or
+// -1 if not in building
+int getCurrentFloorInBuilding(float x, float z, float y)
+{
+  for (int i = 0; i < MAX_BUILDINGS; i++)
+  {
+    Building *b = &buildings[i];
+
+    float minX = b->x - b->w;
+    float maxX = b->x + b->w;
+    float minZ = b->z - b->d;
+    float maxZ = b->z + b->d;
+    if (x < minX || x > maxX || z < minZ || z > maxZ)
+      continue;
+
+    // Inside this building - determine which floor based on Y position
+    float baseY = getTerrainHeight(b->x, b->z);
+    float floorHeight = b->storyHeight;
+
+    // Check each floor from top to bottom
+    for (int floor = b->stories - 1; floor >= 0; floor--)
+    {
+      float floorY = baseY + 0.05f + (floor * floorHeight);
+      float nextFloorY = baseY + 0.05f + ((floor + 1) * floorHeight);
+
+      // If player is above this floor level, they're on this floor
+      if (y >= floorY - 0.5f && y < nextFloorY + 2.0f)
+      {
+        return floor;
+      }
+    }
+
+    // If below ground floor, return ground floor (0)
+    return 0;
+  }
+
+  return -1; // Not in any building
+}
+
+// Check if a point is inside any building
+bool isInsideBuilding(float x, float z)
+{
+  for (int i = 0; i < MAX_BUILDINGS; i++)
+  {
+    Building *b = &buildings[i];
+    float minX = b->x - b->w;
+    float maxX = b->x + b->w;
+    float minZ = b->z - b->d;
+    float maxZ = b->z + b->d;
+    if (x >= minX && x <= maxX && z >= minZ && z <= maxZ)
+    {
+      return true;
+    }
+  }
+  return false;
+}
+
 // Check if player is near a door
-int getNearestDoor() {
+int getNearestDoor()
+{
   float doorRange = 4.0f;
-  for (int i = 0; i < MAX_BUILDINGS; i++) {
+  for (int i = 0; i < MAX_BUILDINGS; i++)
+  {
     Building *b = &buildings[i];
 
     // Door is on the front face (positive z side)
@@ -170,7 +238,8 @@ int getNearestDoor() {
 }
 
 // Crosshair display
-void drawCrosshair() {
+void drawCrosshair()
+{
   glDisable(GL_LIGHTING);
   glDisable(GL_TEXTURE_2D);
   glDisable(GL_DEPTH_TEST);
@@ -196,7 +265,8 @@ void drawCrosshair() {
 
   // Outer circle
   glBegin(GL_LINE_LOOP);
-  for (int i = 0; i < 20; i++) {
+  for (int i = 0; i < 20; i++)
+  {
     float angle = i * 2.0f * M_PI / 20.0f;
     glVertex2f(0.02f * cosf(angle), 0.02f * sinf(angle));
   }
@@ -211,7 +281,8 @@ void drawCrosshair() {
 }
 
 // Draw muzzle flash
-void drawMuzzleFlash() {
+void drawMuzzleFlash()
+{
   if (muzzleFlashTime <= 0.0f)
     return;
 
@@ -231,7 +302,8 @@ void drawMuzzleFlash() {
   glColor4f(1.0f, 0.5f, 0.0f, intensity * 0.5f);
   glutSolidSphere(0.25f * intensity, 12, 12);
 
-  for (int i = 0; i < 8; i++) {
+  for (int i = 0; i < 8; i++)
+  {
     float angle = i * M_PI / 4.0f;
     float dist = 0.3f * intensity;
     glPushMatrix();
@@ -248,9 +320,11 @@ void drawMuzzleFlash() {
   glEnable(GL_LIGHTING);
 }
 
-bool loadOBJ(const char *path, GunModel *model) {
+bool loadOBJ(const char *path, GunModel *model)
+{
   FILE *file = fopen(path, "r");
-  if (!file) {
+  if (!file)
+  {
     printf("Failed to open OBJ file: %s\n", path);
     return false;
   }
@@ -270,39 +344,51 @@ bool loadOBJ(const char *path, GunModel *model) {
   char line[256];
   int lineNum = 0;
 
-  while (fgets(line, sizeof(line), file)) {
+  while (fgets(line, sizeof(line), file))
+  {
     lineNum++;
 
     // Skip comments and empty lines
     if (line[0] == '#' || line[0] == '\n' || line[0] == '\r')
       continue;
 
-    if (strncmp(line, "v ", 2) == 0) {
+    if (strncmp(line, "v ", 2) == 0)
+    {
       float x, y, z;
-      if (sscanf(line, "v %f %f %f", &x, &y, &z) == 3) {
+      if (sscanf(line, "v %f %f %f", &x, &y, &z) == 3)
+      {
         tempVertices[vCount * 3] = x;
         tempVertices[vCount * 3 + 1] = y;
         tempVertices[vCount * 3 + 2] = z;
         vCount++;
       }
-    } else if (strncmp(line, "vn ", 3) == 0) {
+    }
+    else if (strncmp(line, "vn ", 3) == 0)
+    {
       float x, y, z;
-      if (sscanf(line, "vn %f %f %f", &x, &y, &z) == 3) {
+      if (sscanf(line, "vn %f %f %f", &x, &y, &z) == 3)
+      {
         tempNormals[nCount * 3] = x;
         tempNormals[nCount * 3 + 1] = y;
         tempNormals[nCount * 3 + 2] = z;
         nCount++;
       }
-    } else if (strncmp(line, "vt ", 3) == 0) {
+    }
+    else if (strncmp(line, "vt ", 3) == 0)
+    {
       float u, v;
-      if (sscanf(line, "vt %f %f", &u, &v) == 2) {
+      if (sscanf(line, "vt %f %f", &u, &v) == 2)
+      {
         tempTexCoords[tCount * 2] = u;
         tempTexCoords[tCount * 2 + 1] = v;
         tCount++;
       }
-    } else if (strncmp(line, "f ", 2) == 0) {
+    }
+    else if (strncmp(line, "f ", 2) == 0)
+    {
       // Check if we've reached max faces
-      if (faceCount >= maxFaces) {
+      if (faceCount >= maxFaces)
+      {
         printf("Warning: Reached maximum face count (%d), stopping load\n",
                maxFaces);
         break;
@@ -315,12 +401,14 @@ bool loadOBJ(const char *path, GunModel *model) {
       matches = sscanf(line, "f %d/%d/%d %d/%d/%d %d/%d/%d", &v1, &t1, &n1, &v2,
                        &t2, &n2, &v3, &t3, &n3);
 
-      if (matches == 9) {
+      if (matches == 9)
+      {
         // Bounds checking
         if (v1 < 1 || v1 > vCount || v2 < 1 || v2 > vCount || v3 < 1 ||
             v3 > vCount || t1 < 1 || t1 > tCount || t2 < 1 || t2 > tCount ||
             t3 < 1 || t3 > tCount || n1 < 1 || n1 > nCount || n2 < 1 ||
-            n2 > nCount || n3 < 1 || n3 > nCount) {
+            n2 > nCount || n3 < 1 || n3 > nCount)
+        {
           printf("Line %d: Index out of bounds, skipping\n", lineNum);
           continue;
         }
@@ -358,16 +446,20 @@ bool loadOBJ(const char *path, GunModel *model) {
         texCoords[faceCount * 6 + 5] = tempTexCoords[(t3 - 1) * 2 + 1];
 
         faceCount++;
-      } else {
+      }
+      else
+      {
         // Try format: f v//vn v//vn v//vn
         matches = sscanf(line, "f %d//%d %d//%d %d//%d", &v1, &n1, &v2, &n2,
                          &v3, &n3);
 
-        if (matches == 6) {
+        if (matches == 6)
+        {
           // Bounds checking
           if (v1 < 1 || v1 > vCount || v2 < 1 || v2 > vCount || v3 < 1 ||
               v3 > vCount || n1 < 1 || n1 > nCount || n2 < 1 || n2 > nCount ||
-              n3 < 1 || n3 > nCount) {
+              n3 < 1 || n3 > nCount)
+          {
             printf(
                 "Line %d: Index out of bounds "
                 "(v1=%d,v2=%d,v3=%d,n1=%d,n2=%d,n3=%d), vCount=%d, nCount=%d\n",
@@ -410,16 +502,20 @@ bool loadOBJ(const char *path, GunModel *model) {
           texCoords[faceCount * 6 + 5] = 1.0f;
 
           faceCount++;
-        } else {
+        }
+        else
+        {
           // Try format: f v/vt v/vt v/vt
           matches =
               sscanf(line, "f %d/%d %d/%d %d/%d", &v1, &t1, &v2, &t2, &v3, &t3);
 
-          if (matches == 6) {
+          if (matches == 6)
+          {
             // Bounds checking
             if (v1 < 1 || v1 > vCount || v2 < 1 || v2 > vCount || v3 < 1 ||
                 v3 > vCount || t1 < 1 || t1 > tCount || t2 < 1 || t2 > tCount ||
-                t3 < 1 || t3 > tCount) {
+                t3 < 1 || t3 > tCount)
+            {
               printf("Line %d: Index out of bounds, skipping\n", lineNum);
               continue;
             }
@@ -441,7 +537,8 @@ bool loadOBJ(const char *path, GunModel *model) {
             float nz = u[0] * v[1] - u[1] * v[0];
 
             float len = sqrtf(nx * nx + ny * ny + nz * nz);
-            if (len > 0.0001f) {
+            if (len > 0.0001f)
+            {
               nx /= len;
               ny /= len;
               nz /= len;
@@ -478,14 +575,18 @@ bool loadOBJ(const char *path, GunModel *model) {
             texCoords[faceCount * 6 + 5] = tempTexCoords[(t3 - 1) * 2 + 1];
 
             faceCount++;
-          } else {
+          }
+          else
+          {
             // Try format: f v v v (vertices only)
             matches = sscanf(line, "f %d %d %d", &v1, &v2, &v3);
 
-            if (matches == 3) {
+            if (matches == 3)
+            {
               // Bounds checking
               if (v1 < 1 || v1 > vCount || v2 < 1 || v2 > vCount || v3 < 1 ||
-                  v3 > vCount) {
+                  v3 > vCount)
+              {
                 printf("Line %d: Index out of bounds, skipping\n", lineNum);
                 continue;
               }
@@ -507,7 +608,8 @@ bool loadOBJ(const char *path, GunModel *model) {
               float nz = u[0] * v[1] - u[1] * v[0];
 
               float len = sqrtf(nx * nx + ny * ny + nz * nz);
-              if (len > 0.0001f) {
+              if (len > 0.0001f)
+              {
                 nx /= len;
                 ny /= len;
                 nz /= len;
@@ -544,7 +646,9 @@ bool loadOBJ(const char *path, GunModel *model) {
               texCoords[faceCount * 6 + 5] = 1.0f;
 
               faceCount++;
-            } else {
+            }
+            else
+            {
               printf("Line %d: Unrecognized face format: %s", lineNum, line);
             }
           }
@@ -571,12 +675,14 @@ bool loadOBJ(const char *path, GunModel *model) {
   return true;
 }
 
-float getStairHeightAt(float x, float z) {
+float getStairHeightAt(float x, float z)
+{
   // Default desired eye height is terrain height + eye offset
   const float eyeOffset = 1.5f;
-  float desiredEyeY = getTerrainHeight(x, z) + eyeOffset;
 
-  for (int i = 0; i < MAX_BUILDINGS; i++) {
+  // Check if we're inside any building first
+  for (int i = 0; i < MAX_BUILDINGS; i++)
+  {
     Building *b = &buildings[i];
 
     float minX = b->x - b->w;
@@ -586,34 +692,70 @@ float getStairHeightAt(float x, float z) {
     if (x < minX || x > maxX || z < minZ || z > maxZ)
       continue;
 
+    // Inside a building - check if we're on stairs
     float stairX = b->x + b->w - 1.0f;
     float stairZStart = b->z - b->d + 0.8f;
     float stairDepth = 0.35f;
     float stairHeight = 0.25f;
     int stepsPerFloor = (int)(b->storyHeight / stairHeight) + 2;
 
-    if (fabsf(x - stairX) > 1.0f)
-      continue;
+    bool onStairs = (fabsf(x - stairX) <= 1.0f);
+    if (onStairs)
+    {
+      float dz = z - stairZStart;
+      if (dz >= 0 && dz <= stepsPerFloor * stairDepth * (b->stories - 1))
+      {
+        // On stairs - use stair height
+        int floor = (int)(dz / (stepsPerFloor * stairDepth));
+        float localZ = fmodf(dz, stepsPerFloor * stairDepth);
+        float stepIndex = localZ / stairDepth;
+        float localY = floor * b->storyHeight + stepIndex * stairHeight;
+        float baseY = getTerrainHeight(b->x, b->z);
+        return baseY + localY + eyeOffset;
+      }
+    }
 
-    float dz = z - stairZStart;
-    if (dz < 0 || dz > stepsPerFloor * stairDepth * (b->stories - 1))
-      continue;
+    // Inside building but not on stairs
+    // Use collision detection to determine which floor we're on
+    int currentFloor = getCurrentFloorInBuilding(x, z, fpvY);
 
-    int floor = (int)(dz / (stepsPerFloor * stairDepth));
-    float localZ = fmodf(dz, stepsPerFloor * stairDepth);
+    float baseY =
+        getTerrainHeight(b->x, b->z); // Building's base terrain height
+    float floorHeight = b->storyHeight;
 
-    float stepIndex = localZ / stairDepth;
-    float localY = floor * b->storyHeight + stepIndex * stairHeight;
-    float baseY = getTerrainHeight(b->x, b->z);
-    return baseY + localY + eyeOffset;
+    // Calculate the floor Y position for the current floor
+    float currentFloorY = baseY + 0.05f + (currentFloor * floorHeight);
+
+    // Calculate height offset relative to the current floor
+    float heightOffset;
+    if (fpvY > currentFloorY + 0.3f && fpvY < currentFloorY + 10.0f)
+    {
+      // Calculate offset from current floor
+      heightOffset = fpvY - currentFloorY;
+      // Clamp to reasonable range (1.0 to 3.0 above floor)
+      if (heightOffset < 1.0f)
+        heightOffset = eyeOffset; // Ensure at least normal eye height
+      if (heightOffset > 3.0f)
+        heightOffset = eyeOffset;
+    }
+    else
+    {
+      heightOffset = eyeOffset; // Default to normal eye height
+    }
+
+    // Maintain proper height above the current floor level
+    return currentFloorY + heightOffset;
   }
 
-  return desiredEyeY;
+  // Outside all buildings - use terrain height
+  return getTerrainHeight(x, z) + eyeOffset;
 }
 
-GLuint loadTexture(const char *file) {
+GLuint loadTexture(const char *file)
+{
   unsigned char *data = stbi_load(file, &w, &h, &n, 3);
-  if (!data) {
+  if (!data)
+  {
     printf("Failed to load %s\n", file);
     return 0;
   }
@@ -632,14 +774,16 @@ GLuint loadTexture(const char *file) {
   return tex;
 }
 
-float getTerrainHeight(float x, float z) {
+float getTerrainHeight(float x, float z)
+{
   // Match the wavy terrain used in drawTerrain()
   const float frequency = 0.1f;
   const float amplitude = 2.5f;
   return sinf(x * frequency) * cosf(z * frequency) * amplitude;
 }
 
-void initBuildings() {
+void initBuildings()
+{
   buildings[0] =
       (Building){20.0f, 20.0f, 6.0f, 6.0f, 3, 4.0f, 0, 0, false, 0.0f};
   buildings[1] =
@@ -654,27 +798,31 @@ void initBuildings() {
       (Building){-30.0f, -5.0f, 8.0f, 4.0f, 5, 4.0f, 0, 0, false, 0.0f};
 }
 
-void initTargets() {
+void initTargets()
+{
   int targetIdx = 0;
 
   // Place targets inside buildings on different floors
-  for (int b = 0; b < MAX_BUILDINGS && targetIdx < MAX_OBJECTS - 5; b++) {
+  for (int b = 0; b < MAX_BUILDINGS && targetIdx < MAX_OBJECTS - 5; b++)
+  {
     Building *building = &buildings[b];
     for (int floor = 0;
-         floor < building->stories && targetIdx < MAX_OBJECTS - 5; floor++) {
+         floor < building->stories && targetIdx < MAX_OBJECTS - 5; floor++)
+    {
       float tx = building->x + (rand() % 3 - 1) * 2.0f;
       float ty = floor * building->storyHeight + 2.0f;
       float tz = building->z + (rand() % 3 - 1) * 2.0f;
 
       targets[targetIdx] = (Target){
-          tx, ty,   tz, 0, true, rand() % 3, -1.0, 0.8f + (rand() % 4) / 10.0f,
-          b,  floor};
+          tx, ty, tz, 0, true, rand() % 3, -1.0, 0.8f + (rand() % 4) / 10.0f,
+          b, floor};
       targetIdx++;
     }
   }
 
   // Remaining ground targets
-  for (; targetIdx < MAX_OBJECTS; targetIdx++) {
+  for (; targetIdx < MAX_OBJECTS; targetIdx++)
+  {
     float tx = (rand() % 80 - 40);
     float tz = (rand() % 80 - 40);
     float ty = getTerrainHeight(tx, tz) + 1.5f;
@@ -686,23 +834,28 @@ void initTargets() {
   targetsDestroyed = 0;
 }
 
-void checkCollisions() {
-  for (int i = 0; i < MAX_BULLETS; i++) {
+void checkCollisions()
+{
+  for (int i = 0; i < MAX_BULLETS; i++)
+  {
     if (!bullets[i].active)
       continue;
-    for (int j = 0; j < MAX_OBJECTS; j++) {
+    for (int j = 0; j < MAX_OBJECTS; j++)
+    {
       if (!targets[j].alive)
         continue;
       float dx = bullets[i].x - targets[j].x;
       float dy = bullets[i].y - targets[j].y;
       float dz = bullets[i].z - targets[j].z;
       float dist = sqrtf(dx * dx + dy * dy + dz * dz);
-      if (dist < (0.8f * targets[j].scale)) {
+      if (dist < (0.8f * targets[j].scale))
+      {
         bullets[i].active = false;
         targets[j].hits++;
         printf("Hit! Target %d - Hits: %d/3 (Floor %d)\n", j, targets[j].hits,
                targets[j].floor);
-        if (targets[j].hits >= 3) {
+        if (targets[j].hits >= 3)
+        {
           targets[j].alive = false;
           targets[j].explodeTime = 0.0f;
           targetsDestroyed++;
@@ -715,8 +868,10 @@ void checkCollisions() {
   }
 }
 
-void updateBullets() {
-  for (int i = 0; i < MAX_BULLETS; i++) {
+void updateBullets()
+{
+  for (int i = 0; i < MAX_BULLETS; i++)
+  {
     if (!bullets[i].active)
       continue;
 
@@ -731,10 +886,12 @@ void updateBullets() {
   }
 }
 
-void drawBullets() {
+void drawBullets()
+{
   glDisable(GL_LIGHTING);
   glColor3f(1, 0.9, 0.3);
-  for (int i = 0; i < MAX_BULLETS; i++) {
+  for (int i = 0; i < MAX_BULLETS; i++)
+  {
     if (!bullets[i].active)
       continue;
     glPushMatrix();
@@ -745,7 +902,8 @@ void drawBullets() {
   glEnable(GL_LIGHTING);
 }
 
-void shootBullet() {
+void shootBullet()
+{
   if (mode_view != 2)
     return;
 
@@ -774,7 +932,8 @@ void shootBullet() {
 
   // --- Aim gun to nearest target while shooting ---
   int nearest = getNearestTargetIndex();
-  if (nearest >= 0) {
+  if (nearest >= 0)
+  {
     float tx = targets[nearest].x - fpvX;
     float ty = targets[nearest].y - fpvY;
     float tz = targets[nearest].z - fpvZ;
@@ -814,11 +973,13 @@ void shootBullet() {
   bulletCount++;
 }
 
-void drawExplosion(float x, float y, float z, float time) {
+void drawExplosion(float x, float y, float z, float time)
+{
   glDisable(GL_LIGHTING);
   glEnable(GL_BLEND);
   int particles = 30;
-  for (int i = 0; i < particles; i++) {
+  for (int i = 0; i < particles; i++)
+  {
     float angle = (2.0f * M_PI * i) / particles;
     float radius = time * 3.0f;
     float px = x + cosf(angle) * radius;
@@ -837,7 +998,8 @@ void drawExplosion(float x, float y, float z, float time) {
 
 void quad(GLuint tex, float x1, float y1, float z1, float x2, float y2,
           float z2, float x3, float y3, float z3, float x4, float y4, float z4,
-          float nx, float ny, float nz, float texScale) {
+          float nx, float ny, float nz, float texScale)
+{
   if (tex)
     glBindTexture(GL_TEXTURE_2D, tex);
   glNormal3f(nx, ny, nz);
@@ -853,7 +1015,8 @@ void quad(GLuint tex, float x1, float y1, float z1, float x2, float y2,
   glEnd();
 }
 
-void drawTerrain() {
+void drawTerrain()
+{
   glEnable(GL_TEXTURE_2D);
   glBindTexture(GL_TEXTURE_2D, texGround);
 
@@ -865,12 +1028,68 @@ void drawTerrain() {
 
   glColor3f(0.4f, 0.6f, 0.3f);
 
-  for (float z = start; z < gridSize; z += step) {
+  for (float z = start; z < gridSize; z += step)
+  {
     glBegin(GL_TRIANGLE_STRIP);
-    for (float x = start; x <= gridSize; x += step) {
+    for (float x = start; x <= gridSize; x += step)
+    {
+      // Check if we're inside a building - if so, use flat floor height instead
+      float y1, y2;
+      if (isInsideBuilding(x, z))
+      {
+        // Find the building this point is in and use its base terrain height
+        bool found = false;
+        for (int i = 0; i < MAX_BUILDINGS; i++)
+        {
+          Building *b = &buildings[i];
+          float minX = b->x - b->w;
+          float maxX = b->x + b->w;
+          float minZ = b->z - b->d;
+          float maxZ = b->z + b->d;
+          if (x >= minX && x <= maxX && z >= minZ && z <= maxZ)
+          {
+            y1 = getTerrainHeight(b->x, b->z); // Flat floor at building base
+            found = true;
+            break;
+          }
+        }
+        if (!found)
+        {
+          y1 = sinf(x * frequency) * cosf(z * frequency) * amplitude;
+        }
+      }
+      else
+      {
+        y1 = sinf(x * frequency) * cosf(z * frequency) * amplitude;
+      }
 
-      float y1 = sinf(x * frequency) * cosf(z * frequency) * amplitude;
-      float y2 = sinf(x * frequency) * cosf((z + step) * frequency) * amplitude;
+      if (isInsideBuilding(x, z + step))
+      {
+        bool found = false;
+        for (int i = 0; i < MAX_BUILDINGS; i++)
+        {
+          Building *b = &buildings[i];
+          float minX = b->x - b->w;
+          float maxX = b->x + b->w;
+          float minZ = b->z - b->d;
+          float maxZ = b->z + b->d;
+          if (x >= minX && x <= maxX && (z + step) >= minZ &&
+              (z + step) <= maxZ)
+          {
+            y2 = getTerrainHeight(b->x, b->z); // Flat floor at building base
+            found = true;
+            break;
+          }
+        }
+        if (!found)
+        {
+          y2 = sinf(x * frequency) * cosf((z + step) * frequency) * amplitude;
+        }
+      }
+      else
+      {
+        y2 = sinf(x * frequency) * cosf((z + step) * frequency) * amplitude;
+      }
 
       glNormal3f(0.0f, 1.0f, 0.0f);
 
@@ -886,9 +1105,11 @@ void drawTerrain() {
   glColor3f(1.0f, 1.0f, 1.0f);
 }
 
-void drawGun() {
+void drawGun()
+{
 
-  if (gunModel.vertexCount <= 0 || !gunModel.vertices) {
+  if (gunModel.vertexCount <= 0 || !gunModel.vertices)
+  {
     printf("Gun model not loaded, drawing fallback box.\n");
     glEnable(GL_TEXTURE_2D);
     glBindTexture(GL_TEXTURE_2D, texGunDiffuse);
@@ -965,7 +1186,8 @@ void drawGun() {
   glPopAttrib();
 }
 
-void drawWindow(float x, float y, float z, float w, float h, int orient) {
+void drawWindow(float x, float y, float z, float w, float h, int orient)
+{
   // orient: 0=front(+z), 1=back(-z), 2=left(-x), 3=right(+x)
   glDisable(GL_TEXTURE_2D);
   glEnable(GL_BLEND);
@@ -992,7 +1214,8 @@ void drawWindow(float x, float y, float z, float w, float h, int orient) {
     glVertex3f(x + w / 2 - frameThick, y + h / 2 - frameThick, z + 0.01f);
     glVertex3f(x - w / 2 + frameThick, y + h / 2 - frameThick, z + 0.01f);
     glEnd();
-  } else if (orient == 1) // Back (-z)
+  }
+  else if (orient == 1) // Back (-z)
   {
     glBegin(GL_QUADS);
     glVertex3f(x - w / 2, y - h / 2, z);
@@ -1008,7 +1231,8 @@ void drawWindow(float x, float y, float z, float w, float h, int orient) {
     glVertex3f(x + w / 2 - frameThick, y + h / 2 - frameThick, z - 0.01f);
     glVertex3f(x - w / 2 + frameThick, y + h / 2 - frameThick, z - 0.01f);
     glEnd();
-  } else if (orient == 2) // Left (-x)
+  }
+  else if (orient == 2) // Left (-x)
   {
     glBegin(GL_QUADS);
     glVertex3f(x, y - h / 2, z - w / 2);
@@ -1024,7 +1248,9 @@ void drawWindow(float x, float y, float z, float w, float h, int orient) {
     glVertex3f(x - 0.01f, y + h / 2 - frameThick, z + w / 2 - frameThick);
     glVertex3f(x - 0.01f, y + h / 2 - frameThick, z - w / 2 + frameThick);
     glEnd();
-  } else if (orient == 3) {
+  }
+  else if (orient == 3)
+  {
     glBegin(GL_QUADS);
     glVertex3f(x, y - h / 2, z - w / 2);
     glVertex3f(x, y - h / 2, z + w / 2);
@@ -1046,7 +1272,8 @@ void drawWindow(float x, float y, float z, float w, float h, int orient) {
   glColor3f(1.0f, 1.0f, 1.0f);
 }
 
-void drawDoor(float x, float y, float z, float angle) {
+void drawDoor(float x, float y, float z, float angle)
+{
   glDisable(GL_TEXTURE_2D);
 
   glPushMatrix();
@@ -1087,7 +1314,8 @@ void drawDoor(float x, float y, float z, float angle) {
   glColor3f(1.0f, 1.0f, 1.0f);
 }
 
-void drawStairs(Building *b, float baseYWorld) {
+void drawStairs(Building *b, float baseYWorld)
+{
   // Stair geometry (local units)
   float stepHeight = 0.25f;
   float stepDepth = 0.35f;
@@ -1098,11 +1326,13 @@ void drawStairs(Building *b, float baseYWorld) {
   float stairZ0 = -b->d + 1.0f; // slightly inside back wall
 
   // Draw stairs for each story
-  for (int floor = 0; floor < b->stories; floor++) {
+  for (int floor = 0; floor < b->stories; floor++)
+  {
     float baseY = floor * b->storyHeight;
     int numSteps = (int)(b->storyHeight / stepHeight);
 
-    for (int s = 0; s < numSteps; s++) {
+    for (int s = 0; s < numSteps; s++)
+    {
       float y = baseY + s * stepHeight;
       float z = stairZ0 + s * stepDepth;
 
@@ -1118,7 +1348,8 @@ void drawStairs(Building *b, float baseYWorld) {
       glPopMatrix();
 
       // record collision box in WORLD coordinates
-      if (stairCount < MAX_STAIRS) {
+      if (stairCount < MAX_STAIRS)
+      {
         Stair *st = &stairs[stairCount++];
         float halfW = stepWidth / 2.0f;
         float halfD = stepDepth / 2.0f;
@@ -1139,7 +1370,8 @@ void drawStairs(Building *b, float baseYWorld) {
   }
 }
 
-void drawBuilding(Building *b) {
+void drawBuilding(Building *b)
+{
   glEnable(GL_TEXTURE_2D);
   float baseY = getTerrainHeight(b->x, b->z);
   float totalHeight = b->stories * b->storyHeight;
@@ -1150,7 +1382,8 @@ void drawBuilding(Building *b) {
   GLuint wallTex = (b->wallTex == 0) ? texBuilding : texConcrete;
 
   // Draw each floor
-  for (int floor = 0; floor < b->stories; floor++) {
+  for (int floor = 0; floor < b->stories; floor++)
+  {
     float floorY = floor * b->storyHeight;
     float nextFloorY = (floor + 1) * b->storyHeight;
 
@@ -1187,7 +1420,8 @@ void drawBuilding(Building *b) {
 
     // Front wall (+z) - ground floor has door
     glBindTexture(GL_TEXTURE_2D, wallTex);
-    if (floor == 0) {
+    if (floor == 0)
+    {
       float doorWidth = 1.8f;
 
       // Left part of front wall
@@ -1209,7 +1443,9 @@ void drawBuilding(Building *b) {
       glDisable(GL_TEXTURE_2D);
       drawDoor(0, doorHeight / 2, b->d + 0.08f, b->doorAngle);
       glEnable(GL_TEXTURE_2D);
-    } else {
+    }
+    else
+    {
       // Upper floors - full wall with windows
       quad(wallTex, -b->w, floorY, b->d, b->w, floorY, b->d, b->w, nextFloorY,
            b->d, -b->w, nextFloorY, b->d, 0, 0, -1, 2);
@@ -1228,7 +1464,8 @@ void drawBuilding(Building *b) {
          nextFloorY, b->d, -b->w, nextFloorY, b->d, 0, 1, 0, 2);
 
     // Floor
-    if (floor == 0 || floor < b->stories) {
+    if (floor == 0 || floor < b->stories)
+    {
       quad(texConcrete, -b->w, floorY + 0.05f, -b->d, b->w, floorY + 0.05f,
            -b->d, b->w, floorY + 0.05f, b->d, -b->w, floorY + 0.05f, b->d, 0, 1,
            0, 2);
@@ -1246,7 +1483,8 @@ void drawBuilding(Building *b) {
   glPopMatrix();
 }
 
-void drawTarget(Target *t) {
+void drawTarget(Target *t)
+{
   glEnable(GL_LIGHTING);
   glDisable(GL_TEXTURE_2D);
   glPushMatrix();
@@ -1260,11 +1498,16 @@ void drawTarget(Target *t) {
   else
     glColor3f(1.0f, 0.9f, 0.2f);
 
-  if (t->type == 0) {
+  if (t->type == 0)
+  {
     glutSolidCube(1.5);
-  } else if (t->type == 1) {
+  }
+  else if (t->type == 1)
+  {
     glutSolidSphere(0.8, 16, 16);
-  } else {
+  }
+  else
+  {
     glutSolidTorus(0.3, 0.6, 12, 16);
   }
 
@@ -1273,8 +1516,40 @@ void drawTarget(Target *t) {
   glColor3f(1.0f, 1.0f, 1.0f);
 }
 
+bool checkCollision(float nextX, float nextZ)
+{
+  float padding = 0.3f;
+  for (int i = 0; i < MAX_BUILDINGS; i++)
+  {
+    Building *b = &buildings[i];
+    float minX = b->x - b->w - padding;
+    float maxX = b->x + b->w + padding;
+    float minZ = b->z - b->d - padding;
+    float maxZ = b->z + b->d + padding;
+
+    if (b->doorOpen)
+    {
+      float doorMinX = b->x - 1.0f;
+      float doorMaxX = b->x + 1.0f;
+      float doorMinZ = b->z + b->d - 0.5f;
+      float doorMaxZ = b->z + b->d + 1.0f;
+      if (nextX >= doorMinX && nextX <= doorMaxX &&
+          nextZ >= doorMinZ && nextZ <= doorMaxZ)
+        continue;
+    }
+
+    if (nextX >= minX && nextX <= maxX &&
+        nextZ >= minZ && nextZ <= maxZ)
+    {
+      return true;
+    }
+  }
+  return false;
+}
+
 void lookAt(double ex, double ey, double ez, double cx, double cy, double cz,
-            double ux, double uy, double uz) {
+            double ux, double uy, double uz)
+{
   double f[3] = {cx - ex, cy - ey, cz - ez};
   double lenf = sqrt(f[0] * f[0] + f[1] * f[1] + f[2] * f[2]);
   if (lenf < 1e-9)
@@ -1294,13 +1569,15 @@ void lookAt(double ex, double ey, double ez, double cx, double cy, double cz,
   double u[3] = {s[1] * f[2] - s[2] * f[1], s[2] * f[0] - s[0] * f[2],
                  s[0] * f[1] - s[1] * f[0]};
   double M[16] = {s[0], u[0], -f[0], 0, s[1], u[1], -f[1], 0,
-                  s[2], u[2], -f[2], 0, 0,    0,    0,     1};
+                  s[2], u[2], -f[2], 0, 0, 0, 0, 1};
   glMultMatrixd(M);
   glTranslated(-ex, -ey, -ez);
 }
 
-void addView() {
-  if (mode_view == 0 || mode_view == 1) {
+void addView()
+{
+  if (mode_view == 0 || mode_view == 1)
+  {
     float radTh = th * DEG2RAD;
     float radPh = ph * DEG2RAD;
     float radius = 50.0f;
@@ -1308,7 +1585,9 @@ void addView() {
     float ey = radius * sinf(radPh) + 10.0f;
     float ez = radius * cosf(radPh) * cosf(radTh);
     lookAt(ex, ey, ez, 0.0, 5.0, 0.0, 0.0, 1.0, 0.0);
-  } else if (mode_view == 2) {
+  }
+  else if (mode_view == 2)
+  {
     float radYaw = fpvYaw * DEG2RAD;
     float radPitch = fpvPitch * DEG2RAD;
     float dirX = cosf(radPitch) * sinf(radYaw);
@@ -1319,7 +1598,8 @@ void addView() {
   }
 }
 
-void idle() {
+void idle()
+{
   lightAngle += 0.15;
   if (lightAngle > 360)
     lightAngle -= 360;
@@ -1327,19 +1607,22 @@ void idle() {
   updateBullets();
   checkCollisions();
 
-  if (gunRecoil > 0) {
+  if (gunRecoil > 0)
+  {
     gunRecoil -= 0.08f;
     if (gunRecoil < 0)
       gunRecoil = 0;
   }
 
-  if (muzzleFlashTime > 0) {
+  if (muzzleFlashTime > 0)
+  {
     muzzleFlashTime -= 0.015f;
     if (muzzleFlashTime < 0)
       muzzleFlashTime = 0;
   }
 
-  if (gunAimBlend > 0.001f) {
+  if (gunAimBlend > 0.001f)
+  {
 
     float s = 0.22f;
     gunAimYaw += (gunAimTargetYaw - gunAimYaw) * s;
@@ -1349,7 +1632,8 @@ void idle() {
     if (gunAimBlend < 0.0f)
       gunAimBlend = 0.0f;
 
-    if (gunAimBlend <= 0.0f) {
+    if (gunAimBlend <= 0.0f)
+    {
 
       gunAimYaw *= 0.85f;
       gunAimPitch *= 0.85f;
@@ -1357,20 +1641,26 @@ void idle() {
   }
 
   // Update door animations
-  for (int i = 0; i < MAX_BUILDINGS; i++) {
-    if (buildings[i].doorOpen && buildings[i].doorAngle < 90.0f) {
+  for (int i = 0; i < MAX_BUILDINGS; i++)
+  {
+    if (buildings[i].doorOpen && buildings[i].doorAngle < 90.0f)
+    {
       buildings[i].doorAngle += 2.5f;
       if (buildings[i].doorAngle > 90.0f)
         buildings[i].doorAngle = 90.0f;
-    } else if (!buildings[i].doorOpen && buildings[i].doorAngle > 0.0f) {
+    }
+    else if (!buildings[i].doorOpen && buildings[i].doorAngle > 0.0f)
+    {
       buildings[i].doorAngle -= 2.5f;
       if (buildings[i].doorAngle < 0.0f)
         buildings[i].doorAngle = 0.0f;
     }
   }
 
-  for (int i = 0; i < MAX_OBJECTS; i++) {
-    if (!targets[i].alive && targets[i].explodeTime >= 0) {
+  for (int i = 0; i < MAX_OBJECTS; i++)
+  {
+    if (!targets[i].alive && targets[i].explodeTime >= 0)
+    {
       targets[i].explodeTime += 0.02f;
       if (targets[i].explodeTime > 1.5f)
         targets[i].explodeTime = -1.0f;
@@ -1379,16 +1669,20 @@ void idle() {
   glutPostRedisplay();
 }
 
-void display() {
+void display()
+{
   glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
   glClearColor(0.5f, 0.7f, 0.9f, 1.0f);
 
   glMatrixMode(GL_PROJECTION);
   glLoadIdentity();
-  if (mode_view == 0) {
+  if (mode_view == 0)
+  {
     double size = dim;
     glOrtho(-asp * size, asp * size, -size, size, -100, 100);
-  } else {
+  }
+  else
+  {
     gluPerspective(fov, asp, 0.1, 500.0);
   }
   glMatrixMode(GL_MODELVIEW);
@@ -1411,15 +1705,20 @@ void display() {
   drawTerrain();
 
   // Draw all buildings
-  for (int i = 0; i < MAX_BUILDINGS; i++) {
+  for (int i = 0; i < MAX_BUILDINGS; i++)
+  {
     drawBuilding(&buildings[i]);
   }
 
   // Draw targets
-  for (int i = 0; i < MAX_OBJECTS; i++) {
-    if (targets[i].alive) {
+  for (int i = 0; i < MAX_OBJECTS; i++)
+  {
+    if (targets[i].alive)
+    {
       drawTarget(&targets[i]);
-    } else if (targets[i].explodeTime >= 0 && targets[i].explodeTime < 1.5f) {
+    }
+    else if (targets[i].explodeTime >= 0 && targets[i].explodeTime < 1.5f)
+    {
       drawExplosion(targets[i].x, targets[i].y, targets[i].z,
                     targets[i].explodeTime);
     }
@@ -1437,7 +1736,8 @@ void display() {
   glPopMatrix();
 
   // FPV mode: draw gun and crosshair
-  if (mode_view == 2) {
+  if (mode_view == 2)
+  {
     glMatrixMode(GL_MODELVIEW);
     glPushMatrix();
     glLoadIdentity();
@@ -1447,7 +1747,8 @@ void display() {
 
     // Draw door prompt
     int nearDoor = getNearestDoor();
-    if (nearDoor >= 0) {
+    if (nearDoor >= 0)
+    {
       glDisable(GL_DEPTH_TEST);
       glDisable(GL_LIGHTING);
       glMatrixMode(GL_PROJECTION);
@@ -1462,7 +1763,8 @@ void display() {
       glRasterPos2f(-0.18f, -0.7f);
       const char *msg = buildings[nearDoor].doorOpen ? "Press E to close door"
                                                      : "Press E to open door";
-      for (const char *c = msg; *c != '\0'; c++) {
+      for (const char *c = msg; *c != '\0'; c++)
+      {
         glutBitmapCharacter(GLUT_BITMAP_HELVETICA_18, *c);
       }
 
@@ -1477,8 +1779,10 @@ void display() {
   glutSwapBuffers();
 }
 
-void special(int key, int x, int y) {
-  if (mode_view == 0 || mode_view == 1) {
+void special(int key, int x, int y)
+{
+  if (mode_view == 0 || mode_view == 1)
+  {
     if (key == GLUT_KEY_LEFT)
       th -= 5;
     else if (key == GLUT_KEY_RIGHT)
@@ -1487,7 +1791,9 @@ void special(int key, int x, int y) {
       ph += 5;
     else if (key == GLUT_KEY_DOWN)
       ph -= 5;
-  } else if (mode_view == 2) {
+  }
+  else if (mode_view == 2)
+  {
     if (key == GLUT_KEY_LEFT)
       fpvYaw += 2.0f;
     else if (key == GLUT_KEY_RIGHT)
@@ -1505,17 +1811,22 @@ void special(int key, int x, int y) {
   glutPostRedisplay();
 }
 
-void toggleMouseCapture(bool capture) {
+void toggleMouseCapture(bool capture)
+{
   mouseCaptured = capture;
-  if (mouseCaptured) {
+  if (mouseCaptured)
+  {
     glutSetCursor(GLUT_CURSOR_NONE);
     glutWarpPointer(windowWidth / 2, windowHeight / 2);
-  } else {
+  }
+  else
+  {
     glutSetCursor(GLUT_CURSOR_INHERIT);
   }
 }
 
-void mouseMove(int x, int y) {
+void mouseMove(int x, int y)
+{
   if (!mouseCaptured)
     return;
 
@@ -1534,48 +1845,66 @@ void mouseMove(int x, int y) {
   glutPostRedisplay();
 }
 
-void mouseClick(int button, int state, int x, int y) {
-  if (button == GLUT_LEFT_BUTTON && state == GLUT_DOWN) {
+void mouseClick(int button, int state, int x, int y)
+{
+  if (button == GLUT_LEFT_BUTTON && state == GLUT_DOWN)
+  {
     shootBullet();
-  } else if (button == GLUT_RIGHT_BUTTON && state == GLUT_DOWN) {
+  }
+  else if (button == GLUT_RIGHT_BUTTON && state == GLUT_DOWN)
+  {
     toggleMouseCapture(!mouseCaptured);
   }
 }
 
-void keyboard(unsigned char ch, int x, int y) {
+void keyboard(unsigned char ch, int x, int y)
+{
   if (ch == 27)
     exit(0);
-  else if (ch == 'v') {
+  else if (ch == 'v')
+  {
     mode_view = (mode_view + 1) % 3;
     const char *modeName = (mode_view == 0)   ? "Orthographic"
                            : (mode_view == 1) ? "Perspective Orbit"
                                               : "First-Person";
     printf("Switched to %s View\n", modeName);
-    if (mode_view == 2) {
+    if (mode_view == 2)
+    {
       toggleMouseCapture(true);
-    } else {
+    }
+    else
+    {
       toggleMouseCapture(false);
     }
-  } else if (ch == ' ' && mode_view == 2) {
+  }
+  else if (ch == ' ' && mode_view == 2)
+  {
     shootBullet();
-  } else if (ch == 'e' && mode_view == 2) {
+  }
+  else if (ch == 'e' && mode_view == 2)
+  {
     int nearDoor = getNearestDoor();
-    if (nearDoor >= 0) {
+    if (nearDoor >= 0)
+    {
       buildings[nearDoor].doorOpen = !buildings[nearDoor].doorOpen;
       printf("Door %d %s\n", nearDoor,
              buildings[nearDoor].doorOpen ? "opening..." : "closing...");
     }
-  } else if (ch == 'r') {
+  }
+  else if (ch == 'r')
+  {
     initTargets();
     bulletCount = 0;
     for (int i = 0; i < MAX_BULLETS; i++)
       bullets[i].active = false;
-    for (int i = 0; i < MAX_BUILDINGS; i++) {
+    for (int i = 0; i < MAX_BUILDINGS; i++)
+    {
       buildings[i].doorOpen = false;
       buildings[i].doorAngle = 0.0f;
     }
     printf("Game reset!\n");
-  } else if (ch == 'i')
+  }
+  else if (ch == 'i')
     lightY += 1.0f;
   else if (ch == 'k')
     lightY -= 1.0f;
@@ -1583,44 +1912,76 @@ void keyboard(unsigned char ch, int x, int y) {
     lightAngle -= 5;
   else if (ch == 'u')
     lightAngle += 5;
-  else if (mode_view == 2) {
+  else if (mode_view == 2)
+  {
     float radYaw = fpvYaw * DEG2RAD;
     float forwardX = sinf(radYaw);
     float forwardZ = cosf(radYaw);
     float rightX = cosf(radYaw);
     float rightZ = -sinf(radYaw);
 
-    if (ch == 'w') {
-      fpvX += forwardX * fpvSpeed;
-      fpvZ += forwardZ * fpvSpeed;
-
+    if (ch == 'w')
+    {
+      float nextX = fpvX + forwardX * fpvSpeed;
+      float nextZ = fpvZ + forwardZ * fpvSpeed;
+      if (!checkCollision(nextX, nextZ))
+      {
+        fpvX = nextX;
+        fpvZ = nextZ;
+      }
       float targetY = getStairHeightAt(fpvX, fpvZ);
       fpvY += (targetY - fpvY) * 0.3f;
-    } else if (ch == 's') {
-      fpvX -= forwardX * fpvSpeed;
-      fpvZ -= forwardZ * fpvSpeed;
-
+    }
+    else if (ch == 's')
+    {
+      float nextX = fpvX - forwardX * fpvSpeed;
+      float nextZ = fpvZ - forwardZ * fpvSpeed;
+      if (!checkCollision(nextX, nextZ))
+      {
+        fpvX = nextX;
+        fpvZ = nextZ;
+      }
       float targetY = getStairHeightAt(fpvX, fpvZ);
       fpvY += (targetY - fpvY) * 0.3f;
-    } else if (ch == 'a') {
-      fpvX -= rightX * fpvSpeed;
-      fpvZ -= rightZ * fpvSpeed;
+    }
+    else if (ch == 'a')
+    {
+      float nextX = fpvX - rightX * fpvSpeed;
+      float nextZ = fpvZ - rightZ * fpvSpeed;
+      if (!checkCollision(nextX, nextZ))
+      {
+        fpvX = nextX;
+        fpvZ = nextZ;
+      }
       float targetY = getStairHeightAt(fpvX, fpvZ);
       fpvY += (targetY - fpvY) * 0.3f;
-    } else if (ch == 'd') {
-      fpvX += rightX * fpvSpeed;
-      fpvZ += rightZ * fpvSpeed;
+    }
+    else if (ch == 'd')
+    {
+      float nextX = fpvX + rightX * fpvSpeed;
+      float nextZ = fpvZ + rightZ * fpvSpeed;
+      if (!checkCollision(nextX, nextZ))
+      {
+        fpvX = nextX;
+        fpvZ = nextZ;
+      }
       float targetY = getStairHeightAt(fpvX, fpvZ);
       fpvY += (targetY - fpvY) * 0.3f;
-    } else if (ch == 'q') {
+    }
+    else if (ch == 'q')
+    {
       fpvY -= 0.3f; // Move down
       if (fpvY < 1.0f)
         fpvY = 1.0f;
-    } else if (ch == 'z') {
+    }
+    else if (ch == 'z')
+    {
       fpvY += 0.3f; // Move up
       if (fpvY > 30.0f)
         fpvY = 30.0f;
-    } else if (ch == 'c') {
+    }
+    else if (ch == 'c')
+    {
       fpvYaw = 180.0f;
       fpvPitch = 0.0f;
     }
@@ -1628,7 +1989,8 @@ void keyboard(unsigned char ch, int x, int y) {
   glutPostRedisplay();
 }
 
-void init() {
+void init()
+{
   glEnable(GL_DEPTH_TEST);
   glEnable(GL_BLEND);
   glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
@@ -1659,7 +2021,8 @@ void init() {
   printf("texGunDiffuse=%u texGunSpecular=%u\n", texGunDiffuse, texGunSpecular);
 
   gunModel.vertexCount = 0;
-  if (!loadOBJ("Glock18.obj", &gunModel)) {
+  if (!loadOBJ("Glock18.obj", &gunModel))
+  {
     printf("Using procedural gun model (gun.obj not found)\n");
   }
   printf("verts=%d texCoords=%p\n", gunModel.vertexCount, gunModel.texCoords);
@@ -1673,7 +2036,8 @@ void init() {
   mouseCaptured = false;
 }
 
-void reshape(int w, int h) {
+void reshape(int w, int h)
+{
   if (h == 0)
     h = 1;
   asp = (double)w / (double)h;
@@ -1682,7 +2046,8 @@ void reshape(int w, int h) {
   windowHeight = h;
 }
 
-int main(int argc, char **argv) {
+int main(int argc, char **argv)
+{
   srand((unsigned)time(NULL));
   glutInit(&argc, argv);
   glutInitDisplayMode(GLUT_RGB | GLUT_DOUBLE | GLUT_DEPTH);
