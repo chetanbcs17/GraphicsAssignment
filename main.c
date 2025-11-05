@@ -1262,7 +1262,7 @@ void drawTerrain()
 
 void drawGun()
 {
-
+  // Fallback if no model loaded
   if (gunModel.vertexCount <= 0 || !gunModel.vertices)
   {
     printf("Gun model not loaded, drawing fallback box.\n");
@@ -1281,14 +1281,51 @@ void drawGun()
     return;
   }
 
+  // Clear depth buffer so gun renders on top
   glClear(GL_DEPTH_BUFFER_BIT);
 
+  // Save all OpenGL state
   glPushAttrib(GL_ALL_ATTRIB_BITS);
 
-  glDisable(GL_DEPTH_TEST);
-  glDisable(GL_LIGHTING);
-  glEnable(GL_TEXTURE_2D);
+  // Set up rendering state for solid gun
+  glEnable(GL_DEPTH_TEST);
+  glDepthFunc(GL_LESS);
+  glDepthMask(GL_TRUE);
 
+  glEnable(GL_LIGHTING); // Enable lighting for realistic look
+  glEnable(GL_LIGHT0);
+
+  glEnable(GL_TEXTURE_2D);
+  glEnable(GL_COLOR_MATERIAL);
+  glColorMaterial(GL_FRONT_AND_BACK, GL_AMBIENT_AND_DIFFUSE);
+
+  glPolygonMode(GL_FRONT_AND_BACK, GL_FILL); // ensure filled
+  glDisable(GL_CULL_FACE);                   // show both sides
+  glDisable(GL_BLEND);
+
+  // Set up lighting for the gun
+  float gunLightPos[] = {1.0f, 1.0f, 2.0f, 0.0f};
+  float gunLightAmbient[] = {0.5f, 0.5f, 0.5f, 1.0f};
+  float gunLightDiffuse[] = {0.8f, 0.8f, 0.8f, 1.0f};
+  float gunLightSpecular[] = {1.0f, 1.0f, 1.0f, 1.0f};
+
+  glLightfv(GL_LIGHT0, GL_POSITION, gunLightPos);
+  glLightfv(GL_LIGHT0, GL_AMBIENT, gunLightAmbient);
+  glLightfv(GL_LIGHT0, GL_DIFFUSE, gunLightDiffuse);
+  glLightfv(GL_LIGHT0, GL_SPECULAR, gunLightSpecular);
+
+  // Set material properties for metallic gun
+  float matAmbient[] = {0.3f, 0.3f, 0.3f, 1.0f};
+  float matDiffuse[] = {0.4f, 0.4f, 0.4f, 1.0f};
+  float matSpecular[] = {0.8f, 0.8f, 0.8f, 1.0f};
+  float matShininess = 64.0f;
+
+  glMaterialfv(GL_FRONT_AND_BACK, GL_AMBIENT, matAmbient);
+  glMaterialfv(GL_FRONT_AND_BACK, GL_DIFFUSE, matDiffuse);
+  glMaterialfv(GL_FRONT_AND_BACK, GL_SPECULAR, matSpecular);
+  glMaterialf(GL_FRONT_AND_BACK, GL_SHININESS, matShininess);
+
+  // Set up separate projection for gun
   glMatrixMode(GL_PROJECTION);
   glPushMatrix();
   glLoadIdentity();
@@ -1298,45 +1335,55 @@ void drawGun()
   glPushMatrix();
   glLoadIdentity();
 
+  // Position gun in view space
   float recoilZ = -0.02f * gunRecoil;
-  glTranslatef(0.4f, -0.3f, -1.2f + recoilZ);
+  glTranslatef(0.5f, -0.4f, -1.0f + recoilZ);
 
-  glRotatef(gunAimPitch, 1, 0, 0);
-  glRotatef(gunAimYaw, 0, 1, 0);
-
-  glRotatef(180.0f, 0, 1, 0);
+  glRotatef(90.0f, 0, 1, 0);
   glRotatef(-10.0f, 1, 0, 0);
+  glRotatef(5.0f, 0, 0, 1);
 
-  glScalef(0.18f, 0.18f, 0.18f);
+  // Scale to appropriate size - INCREASE THIS VALUE TO MAKE GUN BIGGER
+  glScalef(0.15f, 0.15f, 0.15f);
 
-  glEnable(GL_TEXTURE_2D);
-  glBindTexture(GL_TEXTURE_2D, texGunDiffuse);
+  // Bind texture
+  if (texGunDiffuse)
+  {
+    glBindTexture(GL_TEXTURE_2D, texGunDiffuse);
+  }
 
-  glColor3f(0.2f, 0.2f, 0.2f);
+  // Set base color (gray/black for gun metal)
+  glColor4f(0.5f, 0.5f, 0.5f, 1.0f);
 
-  glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
-
-  glShadeModel(GL_SMOOTH);
-
+  // Enable client arrays
   glEnableClientState(GL_VERTEX_ARRAY);
   glEnableClientState(GL_NORMAL_ARRAY);
   glEnableClientState(GL_TEXTURE_COORD_ARRAY);
 
+  // Set array pointers
   glVertexPointer(3, GL_FLOAT, 0, gunModel.vertices);
   glNormalPointer(GL_FLOAT, 0, gunModel.normals);
   glTexCoordPointer(2, GL_FLOAT, 0, gunModel.texCoords);
 
+  glDisable(GL_LIGHTING);
+  glDisable(GL_CULL_FACE);
+  glColor3f(0.7f, 0.7f, 0.7f);
+
+  // Draw the gun model
   glDrawArrays(GL_TRIANGLES, 0, gunModel.vertexCount);
 
+  // Disable client arrays
   glDisableClientState(GL_VERTEX_ARRAY);
   glDisableClientState(GL_NORMAL_ARRAY);
   glDisableClientState(GL_TEXTURE_COORD_ARRAY);
 
+  // Restore matrices
   glPopMatrix();
   glMatrixMode(GL_PROJECTION);
   glPopMatrix();
   glMatrixMode(GL_MODELVIEW);
 
+  // Restore all OpenGL state
   glPopAttrib();
 }
 
@@ -2237,7 +2284,7 @@ void init()
   texTarget = loadTexture("metal.png");
 
   // Try multiple possible gun diffuse texture names
-  texGunDiffuse = loadTexture("gun_diffuse.png");
+  texGunDiffuse = loadTexture("gun_specular.png");
   if (!texGunDiffuse)
     texGunDiffuse = loadTexture("gun.png");
   if (!texGunDiffuse)
