@@ -22,6 +22,9 @@
 
 #define RAD2DEG 57.29577951308232f
 
+#define MAX_GLASS_SHARDS 30
+#define MAX_SHATTERED_WINDOWS 20
+
 float gunAimYaw = 0.0f;
 float gunAimPitch = 0.0f;
 float gunAimTargetYaw = 0.0f;
@@ -243,7 +246,33 @@ int getNearestTargetIndex()
   return best;
 }
 
-float getTerrainHeight(float x, float z);
+float getTerrainHeight(float x, float z)
+{
+  for (int i = 0; i < MAX_BUILDINGS; i++)
+  {
+    Building *b = &buildings[i];
+
+    float padding = 2.0f; // Extra flat area around building
+    float minX = b->x - b->w - padding;
+    float maxX = b->x + b->w + padding;
+    float minZ = b->z - b->d - padding;
+    float maxZ = b->z + b->d + padding;
+
+    if (x >= minX && x <= maxX && z >= minZ && z <= maxZ)
+    {
+      // Inside building area - return flat height at building's base
+      // Calculate what the base height would be at building center
+      const float frequency = 0.1f;
+      const float amplitude = 2.5f;
+      return sinf(b->x * frequency) * cosf(b->z * frequency) * amplitude;
+    }
+  }
+
+  // Outside building areas - use wavy terrain
+  const float frequency = 0.1f;
+  const float amplitude = 2.5f;
+  return sinf(x * frequency) * cosf(z * frequency) * amplitude;
+}
 
 int getCurrentFloorInBuilding(float x, float z, float y)
 {
@@ -363,42 +392,36 @@ void drawMuzzleFlash()
   if (muzzleFlashTime <= 0.0f)
     return;
 
-  // Use shader if available
   if (muzzleFlashProgram != 0 && muzzleFlashVBO != 0)
   {
     glDisable(GL_LIGHTING);
     glDisable(GL_DEPTH_TEST);
     glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE); // Additive blending for glow
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE);
 
-    // Use shader program
     glUseProgram(muzzleFlashProgram);
 
-    // Set uniforms
     GLint timeLoc = glGetUniformLocation(muzzleFlashProgram, "uTime");
     GLint intensityLoc = glGetUniformLocation(muzzleFlashProgram, "uIntensity");
     GLint colorLoc = glGetUniformLocation(muzzleFlashProgram, "uFlashColor");
 
-    float normalizedTime = 1.0f - (muzzleFlashTime / 0.1f); // 0 at start, 1 at end
-    float intensity = muzzleFlashTime / 0.1f;               // 1 at start, 0 at end
+    float normalizedTime = 1.0f - (muzzleFlashTime / 0.1f);
+    float intensity = muzzleFlashTime / 0.1f;
 
     if (timeLoc != -1)
       glUniform1f(timeLoc, normalizedTime);
     if (intensityLoc != -1)
       glUniform1f(intensityLoc, intensity);
     if (colorLoc != -1)
-      glUniform3f(colorLoc, 1.0f, 0.9f, 0.6f); // Warm orange-yellow
+      glUniform3f(colorLoc, 1.0f, 0.9f, 0.6f);
 
     glPushMatrix();
 
-    // Position at gun barrel
     glTranslatef(0.5f, -0.35f, -1.8f);
 
-    // Scale based on intensity
-    float scale = 1.0f + (1.0f - normalizedTime) * 0.5f; // Starts big, shrinks
+    float scale = 1.0f + (1.0f - normalizedTime) * 0.5f;
     glScalef(scale, scale, scale);
 
-    // Bind VBO and draw
     glBindBuffer(GL_ARRAY_BUFFER, muzzleFlashVBO);
 
     glEnableClientState(GL_VERTEX_ARRAY);
@@ -928,14 +951,6 @@ GLuint loadTexture(const char *file)
   return tex;
 }
 
-float getTerrainHeight(float x, float z)
-{
-  // Match the wavy terrain used in drawTerrain()
-  const float frequency = 0.1f;
-  const float amplitude = 2.5f;
-  return sinf(x * frequency) * cosf(z * frequency) * amplitude;
-}
-
 void initBuildings()
 {
   buildings[0] =
@@ -1178,76 +1193,40 @@ void drawTerrain()
   int gridSize = 100;
   float step = 2.0f;
   float start = -gridSize;
-  float frequency = 0.1f;
-  float amplitude = 2.5f;
 
-  glColor3f(0.4f, 0.6f, 0.3f);
+  glColor3f(1.0f, 1.0f, 1.0f);
 
   for (float z = start; z < gridSize; z += step)
   {
     glBegin(GL_TRIANGLE_STRIP);
     for (float x = start; x <= gridSize; x += step)
     {
-      // Check if we're inside a building - if so, use flat floor height instead
-      float y1, y2;
-      if (isInsideBuilding(x, z))
+      // Use the updated getTerrainHeight which handles flat areas
+      float y1 = getTerrainHeight(x, z);
+      float y2 = getTerrainHeight(x, z + step);
+
+      // Calculate normals for proper lighting
+      float dx = 0.1f;
+      float dz = 0.1f;
+      float hL = getTerrainHeight(x - dx, z);
+      float hR = getTerrainHeight(x + dx, z);
+      float hD = getTerrainHeight(x, z - dz);
+      float hU = getTerrainHeight(x, z + dz);
+
+      float nx = (hL - hR) / (2.0f * dx);
+      float nz = (hD - hU) / (2.0f * dz);
+      float ny = 1.0f;
+
+      // Normalize
+      float len = sqrtf(nx * nx + ny * ny + nz * nz);
+      if (len > 0.001f)
       {
-        // Find the building this point is in and use its base terrain height
-        bool found = false;
-        for (int i = 0; i < MAX_BUILDINGS; i++)
-        {
-          Building *b = &buildings[i];
-          float minX = b->x - b->w;
-          float maxX = b->x + b->w;
-          float minZ = b->z - b->d;
-          float maxZ = b->z + b->d;
-          if (x >= minX && x <= maxX && z >= minZ && z <= maxZ)
-          {
-            y1 = getTerrainHeight(b->x, b->z); // Flat floor at building base
-            found = true;
-            break;
-          }
-        }
-        if (!found)
-        {
-          y1 = sinf(x * frequency) * cosf(z * frequency) * amplitude;
-        }
-      }
-      else
-      {
-        y1 = sinf(x * frequency) * cosf(z * frequency) * amplitude;
+        nx /= len;
+        ny /= len;
+        nz /= len;
       }
 
-      if (isInsideBuilding(x, z + step))
-      {
-        bool found = false;
-        for (int i = 0; i < MAX_BUILDINGS; i++)
-        {
-          Building *b = &buildings[i];
-          float minX = b->x - b->w;
-          float maxX = b->x + b->w;
-          float minZ = b->z - b->d;
-          float maxZ = b->z + b->d;
-          if (x >= minX && x <= maxX && (z + step) >= minZ &&
-              (z + step) <= maxZ)
-          {
-            y2 = getTerrainHeight(b->x, b->z); // Flat floor at building base
-            found = true;
-            break;
-          }
-        }
-        if (!found)
-        {
-          y2 = sinf(x * frequency) * cosf((z + step) * frequency) * amplitude;
-        }
-      }
-      else
-      {
-        y2 = sinf(x * frequency) * cosf((z + step) * frequency) * amplitude;
-      }
-
-      glNormal3f(0.0f, 1.0f, 0.0f);
-
+      glNormal3f(nx, ny, nz);
       glTexCoord2f((x - start) / 10.0f, (z - start) / 10.0f);
       glVertex3f(x, y1, z);
 
@@ -2275,7 +2254,7 @@ void init()
   glEnable(GL_COLOR_MATERIAL);
   glColorMaterial(GL_FRONT_AND_BACK, GL_AMBIENT_AND_DIFFUSE);
 
-  texGround = loadTexture("floor.png");
+  texGround = loadTexture("gravelly_sand.png");
   texBuilding = loadTexture("wall.png");
   texRoof = loadTexture("ceiling.png");
   texConcrete = loadTexture("concrete.png");
@@ -2283,7 +2262,6 @@ void init()
   texWood = loadTexture("wood.png");
   texTarget = loadTexture("metal.png");
 
-  // Try multiple possible gun diffuse texture names
   texGunDiffuse = loadTexture("gun_specular.png");
   if (!texGunDiffuse)
     texGunDiffuse = loadTexture("gun.png");
