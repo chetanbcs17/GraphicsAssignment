@@ -63,7 +63,7 @@ bool firstMouse = true;
 #define MAX_STAIRS 10
 
 GLuint texGround, texBuilding, texRoof, texConcrete, texMetal, texWood,
-    texTarget;
+    texTarget, texSmoke = 0;
 GLuint texGunDiffuse, texGunSpecular, texGunNormal;
 
 typedef struct
@@ -129,6 +129,38 @@ bool mouseCaptured = false;
 
 float gunRecoil = 0.0f;
 float muzzleFlashTime = 0.0f;
+
+#define MAX_SMOKE_GRENADES 5
+#define SMOKE_PARTICLES 200
+
+typedef struct
+{
+  float x, y, z;
+  float vx, vy, vz;
+  float size;
+  float lifetime;
+  float rotation;
+  float rotationSpeed;
+} SmokeParticle;
+
+typedef struct
+{
+  float x, y, z;
+  float vx, vy, vz;
+  bool active;
+  bool exploded;
+  float flyTime;
+  float smokeTime;
+
+  SmokeParticle particles[SMOKE_PARTICLES];
+} SmokeGrenade;
+
+// Add these globals
+SmokeGrenade smokeGrenades[MAX_SMOKE_GRENADES];
+int smokeGrenadeCount = 0;
+GLuint smokeShaderProgram = 0;
+GLuint smokeVBO = 0;
+int grenadeInventory = 3;
 
 GLuint loadShader(GLenum type, const char *src)
 {
@@ -223,6 +255,39 @@ void initMuzzleFlashGeometry()
   glBindBuffer(GL_ARRAY_BUFFER, 0);
 
   printf("Muzzle flash geometry initialized\n");
+}
+
+void drawGrenadeHUD()
+{
+  if (mode_view != 2)
+    return;
+
+  glDisable(GL_DEPTH_TEST);
+  glDisable(GL_LIGHTING);
+  glMatrixMode(GL_PROJECTION);
+  glPushMatrix();
+  glLoadIdentity();
+  glOrtho(-1, 1, -1, 1, -1, 1);
+  glMatrixMode(GL_MODELVIEW);
+  glPushMatrix();
+  glLoadIdentity();
+
+  // Draw grenade icon and count in bottom left
+  glColor3f(1.0f, 1.0f, 0.0f);
+  glRasterPos2f(-0.95f, -0.9f);
+
+  char grenadeText[32];
+  sprintf(grenadeText, "Grenades: %d (Press G)", grenadeInventory);
+  for (char *c = grenadeText; *c != '\0'; c++)
+  {
+    glutBitmapCharacter(GLUT_BITMAP_HELVETICA_18, *c);
+  }
+
+  glPopMatrix();
+  glMatrixMode(GL_PROJECTION);
+  glPopMatrix();
+  glMatrixMode(GL_MODELVIEW);
+  glEnable(GL_DEPTH_TEST);
 }
 
 int getNearestTargetIndex()
@@ -1239,6 +1304,403 @@ void drawTerrain()
   glColor3f(1.0f, 1.0f, 1.0f);
 }
 
+void initSmokeGeometry()
+{
+  float quad[] = {
+      // Position (x, y) and TexCoord (u, v)
+      -1.0f, -1.0f, 0.0f, 0.0f,
+      1.0f, -1.0f, 1.0f, 0.0f,
+      1.0f, 1.0f, 1.0f, 1.0f,
+      -1.0f, 1.0f, 0.0f, 1.0f};
+
+  glGenBuffers(1, &smokeVBO);
+  glBindBuffer(GL_ARRAY_BUFFER, smokeVBO);
+  glBufferData(GL_ARRAY_BUFFER, sizeof(quad), quad, GL_STATIC_DRAW);
+  glBindBuffer(GL_ARRAY_BUFFER, 0);
+
+  printf("Smoke particle geometry initialized\n");
+}
+
+void throwSmokeGrenade()
+{
+  if (mode_view != 2 || grenadeInventory <= 0)
+  {
+    if (grenadeInventory <= 0)
+      printf("No grenades left! (Press G to throw)\n");
+    return;
+  }
+
+  if (smokeGrenadeCount >= MAX_SMOKE_GRENADES)
+  {
+    // Reuse oldest grenade slot
+    smokeGrenadeCount = 0;
+  }
+
+  SmokeGrenade *grenade = &smokeGrenades[smokeGrenadeCount];
+
+  // Calculate throw direction
+  float radYaw = fpvYaw * DEG2RAD;
+  float radPitch = fpvPitch * DEG2RAD;
+
+  float dirX = cosf(radPitch) * sinf(radYaw);
+  float dirY = sinf(radPitch);
+  float dirZ = cosf(radPitch) * cosf(radYaw);
+
+  // Set grenade initial position and velocity
+  grenade->x = fpvX + dirX * 1.0f;
+  grenade->y = fpvY + dirY * 1.0f;
+  grenade->z = fpvZ + dirZ * 1.0f;
+
+  float throwSpeed = 15.0f;
+  grenade->vx = dirX * throwSpeed;
+  grenade->vy = dirY * throwSpeed + 3.0f; // Add upward arc
+  grenade->vz = dirZ * throwSpeed;
+
+  grenade->active = true;
+  grenade->exploded = false;
+  grenade->flyTime = 0.0f;
+  grenade->smokeTime = 0.0f;
+
+  smokeGrenadeCount++;
+  grenadeInventory--;
+
+  printf("Smoke grenade thrown! Remaining: %d\n", grenadeInventory);
+}
+
+void explodeSmokeGrenade(SmokeGrenade *grenade)
+{
+  grenade->exploded = true;
+  grenade->smokeTime = 0.0f;
+
+  printf("=== SMOKE GRENADE EXPLODED ===\n");
+  printf("Position: (%.2f, %.2f, %.2f)\n", grenade->x, grenade->y, grenade->z);
+
+  // Create smoke particles with better distribution
+  for (int i = 0; i < SMOKE_PARTICLES; i++)
+  {
+    SmokeParticle *p = &grenade->particles[i];
+
+    // Create layers of smoke at different heights
+    float layer = (float)(i / 40); // 5 layers of 40 particles each
+
+    // Random offset from center - creates spherical cloud
+    float angle = ((float)rand() / RAND_MAX) * 2.0f * M_PI;
+    float radius = ((float)rand() / RAND_MAX) * 1.5f + 0.5f; // 0.5 to 2.0
+    float height = ((float)rand() / RAND_MAX) * 1.5f + layer * 0.3f;
+
+    p->x = cosf(angle) * radius;
+    p->y = height;
+    p->z = sinf(angle) * radius;
+
+    // Slower, more gentle drift
+    p->vx = ((float)rand() / RAND_MAX - 0.5f) * 0.4f;
+    p->vy = ((float)rand() / RAND_MAX) * 0.2f + 0.1f; // Gentle upward drift
+    p->vz = ((float)rand() / RAND_MAX - 0.5f) * 0.4f;
+
+    // Larger particles that overlap more
+    p->size = 2.0f + ((float)rand() / RAND_MAX) * 2.5f;
+    p->rotation = ((float)rand() / RAND_MAX) * 360.0f;
+    p->rotationSpeed = ((float)rand() / RAND_MAX - 0.5f) * 20.0f;
+
+    // More particles spawn immediately for denser initial cloud
+    if (i < SMOKE_PARTICLES * 2 / 3) // 66% spawn immediately
+    {
+      p->lifetime = 0.0f;
+    }
+    else
+    {
+      // Stagger the rest over 4 seconds
+      p->lifetime = ((float)rand() / RAND_MAX) * 4.0f;
+    }
+  }
+
+  printf("Created %d smoke particles (%d spawn immediately)\n",
+         SMOKE_PARTICLES, (SMOKE_PARTICLES * 2) / 3);
+  printf("Smoke duration: 10 seconds\n");
+}
+
+void updateSmokeGrenades()
+{
+  for (int i = 0; i < MAX_SMOKE_GRENADES; i++)
+  {
+    SmokeGrenade *g = &smokeGrenades[i];
+    if (!g->active)
+      continue;
+
+    if (!g->exploded)
+    {
+      // Grenade is flying through air
+      g->flyTime += 0.016f;
+
+      // Apply physics
+      g->x += g->vx * 0.016f;
+      g->y += g->vy * 0.016f;
+      g->z += g->vz * 0.016f;
+
+      // Gravity
+      g->vy -= 9.8f * 0.016f;
+
+      // Air resistance
+      g->vx *= 0.99f;
+      g->vz *= 0.99f;
+
+      // Check if hit ground or explode after 2 seconds
+      float groundHeight = getTerrainHeight(g->x, g->z);
+      if (g->y <= groundHeight + 0.2f || g->flyTime >= 2.0f)
+      {
+        g->y = groundHeight + 0.2f;
+        explodeSmokeGrenade(g);
+      }
+    }
+    else
+    {
+      // Smoke is active
+      g->smokeTime += 0.016f;
+
+      // Deactivate after 10 seconds
+      if (g->smokeTime >= 10.0f)
+      {
+        g->active = false;
+      }
+    }
+  }
+}
+
+void drawFlyingGrenades()
+{
+  glDisable(GL_LIGHTING);
+  glDisable(GL_TEXTURE_2D);
+
+  for (int i = 0; i < MAX_SMOKE_GRENADES; i++)
+  {
+    SmokeGrenade *g = &smokeGrenades[i];
+    if (!g->active || g->exploded)
+      continue;
+
+    glPushMatrix();
+    glTranslatef(g->x, g->y, g->z);
+
+    glColor3f(0.3f, 0.3f, 0.3f);
+    glRotatef(90, 1, 0, 0);
+
+    GLUquadric *quad = gluNewQuadric();
+    gluQuadricNormals(quad, GLU_SMOOTH);
+    gluCylinder(quad, 0.1, 0.1, 0.2, 8, 2);
+    gluDeleteQuadric(quad);
+
+    glPopMatrix();
+  }
+
+  glEnable(GL_LIGHTING);
+}
+
+// Draw smoke clouds
+// void drawSmokeClouds()
+// {
+//   if (smokeShaderProgram == 0 || smokeVBO == 0)
+//     return;
+
+//   glEnable(GL_BLEND);
+//   glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+//   glDisable(GL_LIGHTING);
+//   glDisable(GL_DEPTH_TEST); // Draw smoke on top
+//   glDepthMask(GL_FALSE);    // Don't write to depth buffer
+
+//   glUseProgram(smokeShaderProgram);
+
+//   for (int i = 0; i < MAX_SMOKE_GRENADES; i++)
+//   {
+//     SmokeGrenade *g = &smokeGrenades[i];
+//     if (!g->active || !g->exploded)
+//       continue;
+
+//     // Set uniforms
+//     GLint timeLoc = glGetUniformLocation(smokeShaderProgram, "uTime");
+//     GLint posLoc = glGetUniformLocation(smokeShaderProgram, "uGrenadePos");
+//     GLint colorLoc = glGetUniformLocation(smokeShaderProgram, "uSmokeColor");
+
+//     if (timeLoc != -1)
+//       glUniform1f(timeLoc, g->smokeTime);
+//     if (posLoc != -1)
+//       glUniform3f(posLoc, g->x, g->y, g->z);
+//     if (colorLoc != -1)
+//       glUniform3f(colorLoc, 0.7f, 0.7f, 0.75f);
+
+//     if (texSmoke)
+//     {
+//       glEnable(GL_TEXTURE_2D);
+//       glBindTexture(GL_TEXTURE_2D, texSmoke);
+//     }
+//     else
+//     {
+//       glDisable(GL_TEXTURE_2D); // fallback
+//     }
+//     // Draw each particle
+//     for (int p = 0; p < SMOKE_PARTICLES; p++)
+//     {
+//       SmokeParticle *particle = &g->particles[p];
+
+//       // Skip if particle hasn't spawned yet
+//       if (g->smokeTime < particle->lifetime)
+//         continue;
+
+//       glPushMatrix();
+
+//       // Position particle
+//       float t = g->smokeTime - particle->lifetime;
+//       float px = g->x + particle->x + particle->vx * t;
+//       float py = g->y + particle->y + particle->vy * t + t * 0.8f; // Rise
+//       float pz = g->z + particle->z + particle->vz * t;
+
+//       glTranslatef(px, py, pz);
+
+//       // Billboard to face camera
+//       glRotatef(-fpvYaw, 0, 1, 0);
+//       glRotatef(-fpvPitch, 1, 0, 0);
+
+//       // Scale based on particle size and lifetime
+//       float scale = particle->size * (1.0f + t * 0.3f);
+//       glScalef(scale, scale, scale);
+
+//       // Draw particle quad
+//       glBindBuffer(GL_ARRAY_BUFFER, smokeVBO);
+//       glEnableClientState(GL_VERTEX_ARRAY);
+//       glEnableClientState(GL_TEXTURE_COORD_ARRAY);
+
+//       glVertexPointer(2, GL_FLOAT, 4 * sizeof(float), (void *)0);
+//       glTexCoordPointer(2, GL_FLOAT, 4 * sizeof(float), (void *)(2 * sizeof(float)));
+
+//       glDrawArrays(GL_QUADS, 0, 4);
+
+//       glDisableClientState(GL_VERTEX_ARRAY);
+//       glDisableClientState(GL_TEXTURE_COORD_ARRAY);
+//       glBindBuffer(GL_ARRAY_BUFFER, 0);
+
+//       glPopMatrix();
+//     }
+//   }
+
+//   glUseProgram(0);
+//   glDepthMask(GL_TRUE);
+//   glEnable(GL_DEPTH_TEST);
+//   glEnable(GL_LIGHTING);
+//   glDisable(GL_BLEND);
+// }
+
+void drawSmokeClouds()
+{
+  if (smokeShaderProgram == 0 || smokeVBO == 0)
+  {
+    printf("Smoke shader or VBO not initialized, using fallback!\n");
+    // drawSmokeCloudsFallback(); // Use the fallback I provided earlier
+    return;
+  }
+
+  // Enable blending for transparency
+  glEnable(GL_BLEND);
+  glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+  glDisable(GL_LIGHTING);
+  glDisable(GL_DEPTH_TEST);
+  glDepthMask(GL_FALSE);
+
+  glUseProgram(smokeShaderProgram);
+
+  // Ensure smoke texture exists
+  if (texSmoke == 0)
+  {
+    unsigned char whitePixel[4] = {255, 255, 255, 255};
+    glGenTextures(1, &texSmoke);
+    glBindTexture(GL_TEXTURE_2D, texSmoke);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 1, 1, 0,
+                 GL_RGBA, GL_UNSIGNED_BYTE, whitePixel);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+  }
+
+  glActiveTexture(GL_TEXTURE0);
+  glBindTexture(GL_TEXTURE_2D, texSmoke);
+  GLint texLoc = glGetUniformLocation(smokeShaderProgram, "uSmokeTex");
+  if (texLoc != -1)
+    glUniform1i(texLoc, 0);
+
+  GLint colorLoc = glGetUniformLocation(smokeShaderProgram, "uSmokeColor");
+  GLint timeLoc = glGetUniformLocation(smokeShaderProgram, "uTime");
+
+  // Get attribute locations
+  GLint posAttrib = glGetAttribLocation(smokeShaderProgram, "aPosition");
+  GLint texAttrib = glGetAttribLocation(smokeShaderProgram, "aTexCoord");
+
+  // Bind VBO
+  glBindBuffer(GL_ARRAY_BUFFER, smokeVBO);
+
+  if (posAttrib >= 0)
+  {
+    glEnableVertexAttribArray(posAttrib);
+    glVertexAttribPointer(posAttrib, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void *)0);
+  }
+  if (texAttrib >= 0)
+  {
+    glEnableVertexAttribArray(texAttrib);
+    glVertexAttribPointer(texAttrib, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void *)(2 * sizeof(float)));
+  }
+
+  for (int i = 0; i < MAX_SMOKE_GRENADES; i++)
+  {
+    SmokeGrenade *g = &smokeGrenades[i];
+    if (!g->active || !g->exploded)
+      continue;
+
+    if (colorLoc >= 0)
+      glUniform3f(colorLoc, 0.7f, 0.7f, 0.75f);
+    if (timeLoc >= 0)
+      glUniform1f(timeLoc, g->smokeTime);
+
+    for (int p = 0; p < SMOKE_PARTICLES; p++)
+    {
+      SmokeParticle *particle = &g->particles[p];
+      if (g->smokeTime < particle->lifetime)
+        continue;
+
+      float t = g->smokeTime - particle->lifetime;
+      float px = g->x + particle->x + particle->vx * t;
+      float py = g->y + particle->y + particle->vy * t + t * 0.8f;
+      float pz = g->z + particle->z + particle->vz * t;
+
+      glPushMatrix();
+
+      // Move to particle position
+      glTranslatef(px, py, pz);
+
+      // Billboard to face camera
+      glRotatef(-fpvYaw, 0, 1, 0);
+      glRotatef(-fpvPitch, 1, 0, 0);
+
+      glRotatef(particle->rotation + t * particle->rotationSpeed, 0, 0, 1);
+
+      // Scale particle
+      float scale = particle->size * (1.0f + t * 0.3f);
+      glScalef(scale, scale, scale);
+
+      // Draw quad from VBO
+      glDrawArrays(GL_QUADS, 0, 4);
+
+      glPopMatrix();
+    }
+  }
+
+  // Cleanup
+  if (posAttrib >= 0)
+    glDisableVertexAttribArray(posAttrib);
+  if (texAttrib >= 0)
+    glDisableVertexAttribArray(texAttrib);
+  glBindBuffer(GL_ARRAY_BUFFER, 0);
+
+  glUseProgram(0);
+  glDepthMask(GL_TRUE);
+  glEnable(GL_DEPTH_TEST);
+  glEnable(GL_LIGHTING);
+  glDisable(GL_BLEND);
+}
 void drawGun()
 {
   // Fallback if no model loaded
@@ -1860,6 +2322,7 @@ void idle()
 
   updateBullets();
   checkCollisions();
+  updateSmokeGrenades();
 
   if (gunRecoil > 0)
   {
@@ -1981,6 +2444,7 @@ void display()
   }
 
   drawBullets();
+  drawFlyingGrenades();
 
   // Draw light indicator
   glDisable(GL_LIGHTING);
@@ -2001,6 +2465,7 @@ void display()
     drawMuzzleFlash();
     drawGun();
     glPopMatrix();
+    drawSmokeClouds();
 
     // Draw door prompt
     int nearDoor = getNearestDoor();
@@ -2020,11 +2485,13 @@ void display()
       glRasterPos2f(-0.18f, -0.7f);
       const char *msg = buildings[nearDoor].doorOpen ? "Press E to close door"
                                                      : "Press E to open door";
+
       for (const char *c = msg; *c != '\0'; c++)
       {
         glutBitmapCharacter(GLUT_BITMAP_HELVETICA_18, *c);
       }
 
+      drawGrenadeHUD();
       glPopMatrix();
       glMatrixMode(GL_PROJECTION);
       glPopMatrix();
@@ -2148,6 +2615,10 @@ void keyboard(unsigned char ch, int x, int y)
              buildings[nearDoor].doorOpen ? "opening..." : "closing...");
     }
   }
+  else if (ch == 'g' && mode_view == 2)
+  {
+    throwSmokeGrenade();
+  }
   else if (ch == 'r')
   {
     initTargets();
@@ -2160,6 +2631,13 @@ void keyboard(unsigned char ch, int x, int y)
       buildings[i].doorAngle = 0.0f;
     }
     printf("Game reset!\n");
+    grenadeInventory = 3;
+    for (int i = 0; i < MAX_SMOKE_GRENADES; i++)
+    {
+      smokeGrenades[i].active = false;
+    }
+    smokeGrenadeCount = 0;
+    printf("Grenades reset! You have 3 grenades.\n");
   }
   else if (ch == 'i')
     lightY += 1.0f;
@@ -2295,6 +2773,30 @@ void init()
     initMuzzleFlashGeometry();
   }
 
+  smokeShaderProgram = createShaderProgramFromFiles(
+      "shaders/smoke_vertex.glsl",
+      "shaders/smoke_fragment.glsl");
+
+  if (smokeShaderProgram == 0)
+  {
+    printf("WARNING: Smoke shader failed to load\n");
+  }
+  else
+  {
+    printf("Smoke shader loaded successfully\n");
+    initSmokeGeometry();
+    texSmoke = loadTexture("smoke.png");
+    if (!texSmoke)
+    {
+      printf("Warning: smoke texture not found, smoke will be drawn as untextured quads\n");
+    }
+  }
+  for (int i = 0; i < MAX_SMOKE_GRENADES; i++)
+  {
+    smokeGrenades[i].active = false;
+  }
+  smokeGrenadeCount = 0;
+  grenadeInventory = 3;
   printf("texGunDiffuse=%u texGunSpecular=%u\n", texGunDiffuse, texGunSpecular);
 
   gunModel.vertexCount = 0;
