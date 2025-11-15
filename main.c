@@ -1,8 +1,10 @@
 #define GL_GLEXT_PROTOTYPES
 #ifdef __APPLE__
 #include <GLUT/glut.h>
+#include <OpenGL/glu.h>
 #else
 #include <GL/glut.h>
+#include <GL/glu.h>
 #endif
 
 #include <math.h>
@@ -63,7 +65,7 @@ bool firstMouse = true;
 #define MAX_STAIRS 10
 
 GLuint texGround, texBuilding, texRoof, texConcrete, texMetal, texWood,
-    texTarget, texSmoke = 0;
+    texTarget, texSmoke = 0, barkTexture, leafTexture, texRock;
 GLuint texGunDiffuse, texGunSpecular, texGunNormal;
 
 typedef struct
@@ -79,6 +81,23 @@ typedef struct
 } Building;
 
 Building buildings[MAX_BUILDINGS];
+
+#define MAX_TREES 100
+#define MAX_BENCHES 20
+#define MAX_ROCKS 50
+
+typedef struct
+{
+  float x, y, z;
+  float scale;
+  float rotation;
+  float tilt;
+  int type;
+  float width;
+  float archHeight;
+} Rock;
+
+Rock rocks[MAX_ROCKS];
 
 typedef struct
 {
@@ -155,12 +174,14 @@ typedef struct
   SmokeParticle particles[SMOKE_PARTICLES];
 } SmokeGrenade;
 
-// Add these globals
 SmokeGrenade smokeGrenades[MAX_SMOKE_GRENADES];
 int smokeGrenadeCount = 0;
 GLuint smokeShaderProgram = 0;
 GLuint smokeVBO = 0;
 int grenadeInventory = 3;
+
+GLuint treeShader, treeTexture;
+float treePositions[100][3];
 
 GLuint loadShader(GLenum type, const char *src)
 {
@@ -410,6 +431,454 @@ int getNearestDoor()
   return -1;
 }
 
+void initEnvironmentObjects()
+{
+  srand(time(NULL));
+
+  for (int i = 0; i < MAX_ROCKS; i++)
+  {
+
+    bool validPosition = false;
+    int attempts = 0;
+
+    while (!validPosition && attempts < 30)
+    {
+      rocks[i].x = (rand() % 180 - 90);
+      rocks[i].z = (rand() % 180 - 90);
+
+      validPosition = true;
+
+      for (int b = 0; b < MAX_BUILDINGS; b++)
+      {
+        float dx = rocks[i].x - buildings[b].x;
+        float dz = rocks[i].z - buildings[b].z;
+        float dist = sqrtf(dx * dx + dz * dz);
+
+        if (dist < (buildings[b].w + buildings[b].d + 8.0f))
+        {
+          validPosition = false;
+          break;
+        }
+      }
+
+      for (int j = 0; j < i; j++)
+      {
+        float dx = rocks[i].x - rocks[j].x;
+        float dz = rocks[i].z - rocks[j].z;
+        float dist = sqrtf(dx * dx + dz * dz);
+
+        if (dist < 15.0f)
+        {
+          validPosition = false;
+          break;
+        }
+      }
+
+      attempts++;
+    }
+
+    rocks[i].y = getTerrainHeight(rocks[i].x, rocks[i].z);
+    rocks[i].type = rand() % 7;
+
+    if (rocks[i].type == 5 || rocks[i].type == 6)
+    {
+
+      rocks[i].scale = 3.0f + (rand() % 200) / 100.0f;
+    }
+    else
+    {
+      rocks[i].scale = 2.0f + (rand() % 300) / 100.0f;
+    }
+
+    rocks[i].rotation = rand() % 360;
+    rocks[i].tilt = (rand() % 20) - 10;
+
+    rocks[i].width = 1.5f + (rand() % 100) / 100.0f;
+    rocks[i].archHeight = 1.2f + (rand() % 80) / 100.0f;
+  }
+
+  printf("Environment objects generated: %d large rock formations\n", MAX_ROCKS);
+}
+
+// Type 0: Large Boulder
+void drawTexturedRock1(float scale)
+{
+  glPushMatrix();
+  glScalef(1.3f, 1.0f, 1.2f);
+
+  GLUquadric *quad = gluNewQuadric();
+  gluQuadricTexture(quad, GL_TRUE);
+  gluQuadricNormals(quad, GLU_SMOOTH);
+  gluSphere(quad, scale, 20, 20);
+  gluDeleteQuadric(quad);
+  glPopMatrix();
+
+  // Add large bumps
+  glPushMatrix();
+  glTranslatef(scale * 0.5f, scale * 0.4f, scale * 0.3f);
+  GLUquadric *quad2 = gluNewQuadric();
+  gluQuadricTexture(quad2, GL_TRUE);
+  gluQuadricNormals(quad2, GLU_SMOOTH);
+  gluSphere(quad2, scale * 0.6f, 16, 16);
+  gluDeleteQuadric(quad2);
+  glPopMatrix();
+}
+
+// Type 1: Tall Pillar
+void drawTexturedRock2(float scale)
+{
+  glPushMatrix();
+  glScalef(0.7f, 2.5f, 0.8f); // Tall and thin
+
+  GLUquadric *quad = gluNewQuadric();
+  gluQuadricTexture(quad, GL_TRUE);
+  gluQuadricNormals(quad, GLU_SMOOTH);
+  gluSphere(quad, scale * 0.8f, 16, 20);
+  gluDeleteQuadric(quad);
+  glPopMatrix();
+
+  // Base
+  glPushMatrix();
+  glTranslatef(0, -scale * 0.8f, 0);
+  glScalef(1.2f, 0.4f, 1.2f);
+  GLUquadric *quad2 = gluNewQuadric();
+  gluQuadricTexture(quad2, GL_TRUE);
+  gluQuadricNormals(quad2, GLU_SMOOTH);
+  gluSphere(quad2, scale * 0.9f, 16, 12);
+  gluDeleteQuadric(quad2);
+  glPopMatrix();
+}
+
+// Type 2: Flat Angular Rock
+void drawTexturedRock3(float scale)
+{
+  glPushMatrix();
+  glRotatef(25, 0, 1, 0);
+  glScalef(1.5f, 0.6f, 1.3f);
+
+  float s = scale * 1.2f;
+
+  // Top face
+  glBegin(GL_QUADS);
+  glNormal3f(0, 1, 0);
+  glTexCoord2f(0, 0);
+  glVertex3f(-s, s * 0.5f, -s);
+  glTexCoord2f(2, 0);
+  glVertex3f(-s, s * 0.5f, s);
+  glTexCoord2f(2, 2);
+  glVertex3f(s, s * 0.5f, s);
+  glTexCoord2f(0, 2);
+  glVertex3f(s, s * 0.5f, -s);
+  glEnd();
+
+  // Sides
+  glBegin(GL_QUADS);
+  glNormal3f(0, 0.7f, 0.7f);
+  glTexCoord2f(0, 0);
+  glVertex3f(-s, -s * 0.5f, s);
+  glTexCoord2f(2, 0);
+  glVertex3f(s, -s * 0.5f, s);
+  glTexCoord2f(2, 1);
+  glVertex3f(s, s * 0.5f, s);
+  glTexCoord2f(0, 1);
+  glVertex3f(-s, s * 0.5f, s);
+  glEnd();
+
+  glBegin(GL_QUADS);
+  glNormal3f(0, 0.7f, -0.7f);
+  glTexCoord2f(0, 0);
+  glVertex3f(-s, -s * 0.5f, -s);
+  glTexCoord2f(0, 1);
+  glVertex3f(-s, s * 0.5f, -s);
+  glTexCoord2f(2, 1);
+  glVertex3f(s, s * 0.5f, -s);
+  glTexCoord2f(2, 0);
+  glVertex3f(s, -s * 0.5f, -s);
+  glEnd();
+
+  glPopMatrix();
+}
+
+// Type 3: Stacked Boulders
+void drawTexturedRock4(float scale)
+{
+  // Bottom large boulder
+  glPushMatrix();
+  glTranslatef(0, scale * 0.3f, 0);
+  glScalef(1.4f, 0.9f, 1.3f);
+  GLUquadric *quad1 = gluNewQuadric();
+  gluQuadricTexture(quad1, GL_TRUE);
+  gluQuadricNormals(quad1, GLU_SMOOTH);
+  gluSphere(quad1, scale, 18, 16);
+  gluDeleteQuadric(quad1);
+  glPopMatrix();
+
+  // Middle boulder
+  glPushMatrix();
+  glTranslatef(scale * 0.3f, scale * 1.3f, -scale * 0.2f);
+  glScalef(1.0f, 1.1f, 0.9f);
+  GLUquadric *quad2 = gluNewQuadric();
+  gluQuadricTexture(quad2, GL_TRUE);
+  gluQuadricNormals(quad2, GLU_SMOOTH);
+  gluSphere(quad2, scale * 0.8f, 16, 14);
+  gluDeleteQuadric(quad2);
+  glPopMatrix();
+
+  // Top small boulder
+  glPushMatrix();
+  glTranslatef(-scale * 0.2f, scale * 2.2f, scale * 0.1f);
+  GLUquadric *quad3 = gluNewQuadric();
+  gluQuadricTexture(quad3, GL_TRUE);
+  gluQuadricNormals(quad3, GLU_SMOOTH);
+  gluSphere(quad3, scale * 0.5f, 14, 12);
+  gluDeleteQuadric(quad3);
+  glPopMatrix();
+}
+
+// Type 4: Leaning Tower
+void drawTexturedRock5(float scale)
+{
+  glPushMatrix();
+  glRotatef(15, 0, 0, 1); // Lean
+
+  // Bottom section
+  glPushMatrix();
+  glScalef(1.0f, 1.2f, 1.0f);
+  GLUquadric *quad1 = gluNewQuadric();
+  gluQuadricTexture(quad1, GL_TRUE);
+  gluQuadricNormals(quad1, GLU_SMOOTH);
+  gluSphere(quad1, scale * 0.9f, 16, 16);
+  gluDeleteQuadric(quad1);
+  glPopMatrix();
+
+  // Middle section
+  glPushMatrix();
+  glTranslatef(0, scale * 1.5f, 0);
+  glScalef(0.85f, 1.3f, 0.85f);
+  GLUquadric *quad2 = gluNewQuadric();
+  gluQuadricTexture(quad2, GL_TRUE);
+  gluQuadricNormals(quad2, GLU_SMOOTH);
+  gluSphere(quad2, scale * 0.8f, 16, 16);
+  gluDeleteQuadric(quad2);
+  glPopMatrix();
+
+  // Top section
+  glPushMatrix();
+  glTranslatef(0, scale * 2.8f, 0);
+  glScalef(0.7f, 1.0f, 0.7f);
+  GLUquadric *quad3 = gluNewQuadric();
+  gluQuadricTexture(quad3, GL_TRUE);
+  gluQuadricNormals(quad3, GLU_SMOOTH);
+  gluSphere(quad3, scale * 0.7f, 14, 14);
+  gluDeleteQuadric(quad3);
+  glPopMatrix();
+
+  glPopMatrix();
+}
+
+// Type 5: NATURAL ARCH (like Arches National Park)
+void drawTexturedArch1(float scale, float width, float archHeight)
+{
+  // Left pillar
+  glPushMatrix();
+  glTranslatef(-width * scale, archHeight * scale * 0.5f, 0);
+  glScalef(0.6f, archHeight, 0.8f);
+  GLUquadric *quad1 = gluNewQuadric();
+  gluQuadricTexture(quad1, GL_TRUE);
+  gluQuadricNormals(quad1, GLU_SMOOTH);
+  gluSphere(quad1, scale, 16, 20);
+  gluDeleteQuadric(quad1);
+  glPopMatrix();
+
+  // Right pillar
+  glPushMatrix();
+  glTranslatef(width * scale, archHeight * scale * 0.5f, 0);
+  glScalef(0.6f, archHeight, 0.8f);
+  GLUquadric *quad2 = gluNewQuadric();
+  gluQuadricTexture(quad2, GL_TRUE);
+  gluQuadricNormals(quad2, GLU_SMOOTH);
+  gluSphere(quad2, scale, 16, 20);
+  gluDeleteQuadric(quad2);
+  glPopMatrix();
+
+  // Arch top (curved)
+  float archTopY = archHeight * scale * 1.1f;
+  int segments = 16;
+  for (int i = 0; i < segments; i++)
+  {
+    float angle = M_PI * i / (segments - 1); // 0 to PI
+    float x = cosf(angle) * width * scale;
+    float y = archTopY + sinf(angle) * scale * 0.6f;
+
+    glPushMatrix();
+    glTranslatef(x, y, 0);
+    glScalef(0.5f, 0.5f, 0.8f);
+    GLUquadric *quad = gluNewQuadric();
+    gluQuadricTexture(quad, GL_TRUE);
+    gluQuadricNormals(quad, GLU_SMOOTH);
+    gluSphere(quad, scale * 0.7f, 12, 12);
+    gluDeleteQuadric(quad);
+    glPopMatrix();
+  }
+
+  // Add some texture to pillars
+  glPushMatrix();
+  glTranslatef(-width * scale * 0.7f, archHeight * scale * 0.3f, scale * 0.3f);
+  glScalef(0.4f, 0.6f, 0.4f);
+  GLUquadric *quad3 = gluNewQuadric();
+  gluQuadricTexture(quad3, GL_TRUE);
+  gluQuadricNormals(quad3, GLU_SMOOTH);
+  gluSphere(quad3, scale * 0.8f, 12, 12);
+  gluDeleteQuadric(quad3);
+  glPopMatrix();
+}
+
+// Type 6: WINDOW ARCH (hole through rock)
+void drawTexturedArch2(float scale, float width, float archHeight)
+{
+  // Main rock body
+  glPushMatrix();
+  glScalef(width * 1.5f, archHeight * 1.2f, 1.0f);
+  GLUquadric *quad1 = gluNewQuadric();
+  gluQuadricTexture(quad1, GL_TRUE);
+  gluQuadricNormals(quad1, GLU_SMOOTH);
+  gluSphere(quad1, scale, 20, 20);
+  gluDeleteQuadric(quad1);
+  glPopMatrix();
+
+  // Draw window opening using cylinders to create hole effect
+  glPushMatrix();
+  glTranslatef(0, archHeight * scale * 0.3f, 0);
+
+  // Left side of window
+  glPushMatrix();
+  glTranslatef(-width * scale * 0.4f, 0, 0);
+  glScalef(0.4f, 0.8f, 1.2f);
+  GLUquadric *quad2 = gluNewQuadric();
+  gluQuadricTexture(quad2, GL_TRUE);
+  gluQuadricNormals(quad2, GLU_SMOOTH);
+  gluSphere(quad2, scale * 0.9f, 14, 14);
+  gluDeleteQuadric(quad2);
+  glPopMatrix();
+
+  // Right side of window
+  glPushMatrix();
+  glTranslatef(width * scale * 0.4f, 0, 0);
+  glScalef(0.4f, 0.8f, 1.2f);
+  GLUquadric *quad3 = gluNewQuadric();
+  gluQuadricTexture(quad3, GL_TRUE);
+  gluQuadricNormals(quad3, GLU_SMOOTH);
+  gluSphere(quad3, scale * 0.9f, 14, 14);
+  gluDeleteQuadric(quad3);
+  glPopMatrix();
+
+  // Top of window
+  glPushMatrix();
+  glTranslatef(0, archHeight * scale * 0.4f, 0);
+  glScalef(0.8f, 0.3f, 1.2f);
+  GLUquadric *quad4 = gluNewQuadric();
+  gluQuadricTexture(quad4, GL_TRUE);
+  gluQuadricNormals(quad4, GLU_SMOOTH);
+  gluSphere(quad4, scale * 0.9f, 14, 14);
+  gluDeleteQuadric(quad4);
+  glPopMatrix();
+
+  // Bottom of window
+  glPushMatrix();
+  glTranslatef(0, -archHeight * scale * 0.2f, 0);
+  glScalef(0.6f, 0.3f, 1.2f);
+  GLUquadric *quad5 = gluNewQuadric();
+  gluQuadricTexture(quad5, GL_TRUE);
+  gluQuadricNormals(quad5, GLU_SMOOTH);
+  gluSphere(quad5, scale * 0.9f, 14, 14);
+  gluDeleteQuadric(quad5);
+  glPopMatrix();
+
+  glPopMatrix();
+
+  // Add detail bumps
+  glPushMatrix();
+  glTranslatef(width * scale * 0.8f, archHeight * scale * 0.8f, scale * 0.4f);
+  glScalef(0.5f, 0.6f, 0.5f);
+  GLUquadric *quad6 = gluNewQuadric();
+  gluQuadricTexture(quad6, GL_TRUE);
+  gluQuadricNormals(quad6, GLU_SMOOTH);
+  gluSphere(quad6, scale * 0.7f, 12, 12);
+  gluDeleteQuadric(quad6);
+  glPopMatrix();
+}
+
+void drawRocks()
+{
+  glEnable(GL_LIGHTING);
+  glEnable(GL_TEXTURE_2D);
+
+  if (texRock)
+    glBindTexture(GL_TEXTURE_2D, texRock);
+
+  // Set material properties
+  GLfloat mat_ambient[] = {0.5f, 0.5f, 0.5f, 1.0f};
+  GLfloat mat_diffuse[] = {0.7f, 0.7f, 0.7f, 1.0f};
+  GLfloat mat_specular[] = {0.15f, 0.15f, 0.15f, 1.0f};
+  GLfloat mat_shininess = 10.0f;
+
+  glMaterialfv(GL_FRONT, GL_AMBIENT, mat_ambient);
+  glMaterialfv(GL_FRONT, GL_DIFFUSE, mat_diffuse);
+  glMaterialfv(GL_FRONT, GL_SPECULAR, mat_specular);
+  glMaterialf(GL_FRONT, GL_SHININESS, mat_shininess);
+
+  for (int i = 0; i < MAX_ROCKS; i++)
+  {
+    Rock *r = &rocks[i];
+
+    glPushMatrix();
+
+    // Position
+    glTranslatef(r->x, r->y - r->scale * 0.3f, r->z); // Sink into ground slightly
+
+    // Rotation
+    glRotatef(r->rotation, 0, 1, 0);
+    glRotatef(r->tilt, 1, 0, 1);
+
+    // Scale
+    glScalef(r->scale, r->scale, r->scale);
+
+    // Color variation
+    float colorVar = (i % 20) * 0.015f;
+    glColor3f(0.85f + colorVar, 0.82f + colorVar, 0.78f + colorVar);
+
+    // Draw different rock formations
+    switch (r->type)
+    {
+    case 0:
+      drawTexturedRock1(1.0f);
+      break;
+    case 1:
+      drawTexturedRock2(1.0f);
+      break;
+    case 2:
+      drawTexturedRock3(1.0f);
+      break;
+    case 3:
+      drawTexturedRock4(1.0f);
+      break;
+    case 4:
+      drawTexturedRock5(1.0f);
+      break;
+    case 5:
+      drawTexturedArch1(1.0f, r->width, r->archHeight);
+      break;
+    case 6:
+      drawTexturedArch2(1.0f, r->width, r->archHeight);
+      break;
+    }
+
+    glPopMatrix();
+  }
+
+  glColor3f(1.0f, 1.0f, 1.0f);
+  glDisable(GL_TEXTURE_2D);
+}
 void drawCrosshair()
 {
   glDisable(GL_LIGHTING);
@@ -1494,99 +1963,6 @@ void drawFlyingGrenades()
   glEnable(GL_LIGHTING);
 }
 
-// Draw smoke clouds
-// void drawSmokeClouds()
-// {
-//   if (smokeShaderProgram == 0 || smokeVBO == 0)
-//     return;
-
-//   glEnable(GL_BLEND);
-//   glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-//   glDisable(GL_LIGHTING);
-//   glDisable(GL_DEPTH_TEST); // Draw smoke on top
-//   glDepthMask(GL_FALSE);    // Don't write to depth buffer
-
-//   glUseProgram(smokeShaderProgram);
-
-//   for (int i = 0; i < MAX_SMOKE_GRENADES; i++)
-//   {
-//     SmokeGrenade *g = &smokeGrenades[i];
-//     if (!g->active || !g->exploded)
-//       continue;
-
-//     // Set uniforms
-//     GLint timeLoc = glGetUniformLocation(smokeShaderProgram, "uTime");
-//     GLint posLoc = glGetUniformLocation(smokeShaderProgram, "uGrenadePos");
-//     GLint colorLoc = glGetUniformLocation(smokeShaderProgram, "uSmokeColor");
-
-//     if (timeLoc != -1)
-//       glUniform1f(timeLoc, g->smokeTime);
-//     if (posLoc != -1)
-//       glUniform3f(posLoc, g->x, g->y, g->z);
-//     if (colorLoc != -1)
-//       glUniform3f(colorLoc, 0.7f, 0.7f, 0.75f);
-
-//     if (texSmoke)
-//     {
-//       glEnable(GL_TEXTURE_2D);
-//       glBindTexture(GL_TEXTURE_2D, texSmoke);
-//     }
-//     else
-//     {
-//       glDisable(GL_TEXTURE_2D); // fallback
-//     }
-//     // Draw each particle
-//     for (int p = 0; p < SMOKE_PARTICLES; p++)
-//     {
-//       SmokeParticle *particle = &g->particles[p];
-
-//       // Skip if particle hasn't spawned yet
-//       if (g->smokeTime < particle->lifetime)
-//         continue;
-
-//       glPushMatrix();
-
-//       // Position particle
-//       float t = g->smokeTime - particle->lifetime;
-//       float px = g->x + particle->x + particle->vx * t;
-//       float py = g->y + particle->y + particle->vy * t + t * 0.8f; // Rise
-//       float pz = g->z + particle->z + particle->vz * t;
-
-//       glTranslatef(px, py, pz);
-
-//       // Billboard to face camera
-//       glRotatef(-fpvYaw, 0, 1, 0);
-//       glRotatef(-fpvPitch, 1, 0, 0);
-
-//       // Scale based on particle size and lifetime
-//       float scale = particle->size * (1.0f + t * 0.3f);
-//       glScalef(scale, scale, scale);
-
-//       // Draw particle quad
-//       glBindBuffer(GL_ARRAY_BUFFER, smokeVBO);
-//       glEnableClientState(GL_VERTEX_ARRAY);
-//       glEnableClientState(GL_TEXTURE_COORD_ARRAY);
-
-//       glVertexPointer(2, GL_FLOAT, 4 * sizeof(float), (void *)0);
-//       glTexCoordPointer(2, GL_FLOAT, 4 * sizeof(float), (void *)(2 * sizeof(float)));
-
-//       glDrawArrays(GL_QUADS, 0, 4);
-
-//       glDisableClientState(GL_VERTEX_ARRAY);
-//       glDisableClientState(GL_TEXTURE_COORD_ARRAY);
-//       glBindBuffer(GL_ARRAY_BUFFER, 0);
-
-//       glPopMatrix();
-//     }
-//   }
-
-//   glUseProgram(0);
-//   glDepthMask(GL_TRUE);
-//   glEnable(GL_DEPTH_TEST);
-//   glEnable(GL_LIGHTING);
-//   glDisable(GL_BLEND);
-// }
-
 void drawSmokeClouds()
 {
   if (smokeShaderProgram == 0 || smokeVBO == 0)
@@ -1701,6 +2077,51 @@ void drawSmokeClouds()
   glEnable(GL_LIGHTING);
   glDisable(GL_BLEND);
 }
+
+void setupLighting()
+{
+  glEnable(GL_LIGHTING);
+  glEnable(GL_LIGHT0);
+
+  GLfloat ambient[] = {0.3f, 0.3f, 0.3f, 1.0f};
+
+  GLfloat diffuse[] = {0.9f, 0.9f, 0.8f, 1.0f};
+  GLfloat specular[] = {1.0f, 1.0f, 0.9f, 1.0f};
+  GLfloat position[] = {
+      lightDist * cosf(lightAngle * DEG2RAD),
+      lightY,
+      lightDist * sinf(lightAngle * DEG2RAD),
+      1.0f // positional light
+  };
+
+  glLightfv(GL_LIGHT0, GL_AMBIENT, ambient);
+  glLightfv(GL_LIGHT0, GL_DIFFUSE, diffuse);
+  glLightfv(GL_LIGHT0, GL_SPECULAR, specular);
+  glLightfv(GL_LIGHT0, GL_POSITION, position);
+
+  // Material properties (for all objects)
+  GLfloat mat_specular[] = {0.5f, 0.5f, 0.5f, 1.0f};
+  GLfloat mat_shininess[] = {32.0f};
+  glMaterialfv(GL_FRONT, GL_SPECULAR, mat_specular);
+  glMaterialfv(GL_FRONT, GL_SHININESS, mat_shininess);
+
+  glLightModelfv(GL_LIGHT_MODEL_AMBIENT, ambient);
+}
+
+void setupFog()
+{
+  glEnable(GL_FOG);
+
+  GLfloat fogColor[] = {0.6f, 0.7f, 0.8f, 1.0f}; // soft sky color
+  glFogfv(GL_FOG_COLOR, fogColor);
+
+  glFogi(GL_FOG_MODE, GL_EXP2);   // exponential squared fog
+  glFogf(GL_FOG_DENSITY, 0.015f); // tweak for more or less fog
+  glHint(GL_FOG_HINT, GL_NICEST); // highest quality
+
+  glClearColor(fogColor[0], fogColor[1], fogColor[2], fogColor[3]);
+}
+
 void drawGun()
 {
   // Fallback if no model loaded
@@ -2316,9 +2737,11 @@ void addView()
 
 void idle()
 {
-  lightAngle += 0.15;
-  if (lightAngle > 360)
-    lightAngle -= 360;
+  lightAngle += 0.05f;
+
+  if (lightAngle > 360.0f)
+    lightAngle -= 360.0f;
+  setupLighting();
 
   updateBullets();
   checkCollisions();
@@ -2428,6 +2851,8 @@ void display()
   {
     drawBuilding(&buildings[i]);
   }
+
+  drawRocks();
 
   // Draw targets
   for (int i = 0; i < MAX_OBJECTS; i++)
@@ -2791,6 +3216,73 @@ void init()
       printf("Warning: smoke texture not found, smoke will be drawn as untextured quads\n");
     }
   }
+
+  treeShader = createShaderProgramFromFiles("shaders/tree_vertex.glsl", "shaders/tree_fragment.glsl");
+  if (!treeShader)
+    printf("Failed to load tree shader\n");
+
+  barkTexture = loadTexture("bark.jpg");
+  leafTexture = loadTexture("leaf.jpg");
+
+  // Rock texture
+
+  texRock = loadTexture("rock.jpg");
+  if (!texRock)
+  {
+    texRock = loadTexture("rock.png");
+  }
+  if (!texRock)
+  {
+    printf("Creating procedural rock texture\n");
+
+    // Create more realistic rocky texture with varied patterns
+    int texSize = 256;
+    unsigned char *rockData = (unsigned char *)malloc(texSize * texSize * 3);
+
+    for (int y = 0; y < texSize; y++)
+    {
+      for (int x = 0; x < texSize; x++)
+      {
+        int idx = (y * texSize + x) * 3;
+
+        // Base gray color
+        int base = 70 + (rand() % 60);
+
+        // Add some variation patterns
+        int pattern = (x / 16 + y / 16) % 2;
+        int variation = pattern ? 15 : -15;
+
+        // Add noise
+        int noise = (rand() % 30) - 15;
+
+        // Create slight color tint (brownish-gray)
+        rockData[idx] = base + variation + noise;               // R
+        rockData[idx + 1] = (base + variation + noise) * 0.95f; // G (slightly less)
+        rockData[idx + 2] = (base + variation + noise) * 0.90f; // B (even less for warmth)
+
+        // Clamp values
+        for (int c = 0; c < 3; c++)
+        {
+          if (rockData[idx + c] < 40)
+            rockData[idx + c] = 40;
+          if (rockData[idx + c] > 180)
+            rockData[idx + c] = 180;
+        }
+      }
+    }
+
+    glGenTextures(1, &texRock);
+    glBindTexture(GL_TEXTURE_2D, texRock);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, texSize, texSize, 0, GL_RGB, GL_UNSIGNED_BYTE, rockData);
+    glGenerateMipmap(GL_TEXTURE_2D);
+
+    free(rockData);
+    printf("Procedural rock texture created (%dx%d)\n", texSize, texSize);
+  }
   for (int i = 0; i < MAX_SMOKE_GRENADES; i++)
   {
     smokeGrenades[i].active = false;
@@ -2808,11 +3300,13 @@ void init()
 
   initBuildings();
   initTargets();
+  initEnvironmentObjects();
 
   for (int i = 0; i < MAX_BULLETS; i++)
     bullets[i].active = false;
 
   mouseCaptured = false;
+  setupFog();
 }
 
 void reshape(int w, int h)
@@ -2833,6 +3327,11 @@ int main(int argc, char **argv)
   glutInitWindowSize(windowWidth, windowHeight);
   glutCreateWindow("FPV Arena - Multi-Story Buildings");
   init();
+  printf("OpenGL version: %s\n", glGetString(GL_VERSION));
+  printf("GLSL version: %s\n", glGetString(GL_SHADING_LANGUAGE_VERSION));
+  printf("Renderer: %s\n", glGetString(GL_RENDERER));
+  printf("Vendor: %s\n", glGetString(GL_VENDOR));
+
   glutDisplayFunc(display);
   glutSpecialFunc(special);
   glutKeyboardFunc(keyboard);
